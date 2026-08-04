@@ -52,6 +52,9 @@
   const modeSwitch = $("#modeSwitch");
   const sectionKicker = $("#sectionKicker");
   const sourceCopy = $("#sourceCopy");
+  const themeToggle = $("#themeToggle");
+  const themeIcon = $("#themeIcon");
+  const themeLabel = $("#themeLabel");
   const viewButtons = [...document.querySelectorAll("[data-view]")];
   const pageSize = 18;
   let view = "drop";
@@ -94,6 +97,25 @@
   const monsterById = new Map(dropData.monsters.map((monster) => [Number(monster.id), monster]));
   const questById = new Map(questData.quests.map((quest) => [Number(quest.id), quest]));
 
+  const questNextIds = new Map();
+  const questPreviousIds = new Map();
+  const addQuestEdge = (fromId, toId) => {
+    const from = Number(fromId);
+    const to = Number(toId);
+    if (from === to || !questById.has(from) || !questById.has(to)) return;
+    if (!questNextIds.has(from)) questNextIds.set(from, new Set());
+    if (!questPreviousIds.has(to)) questPreviousIds.set(to, new Set());
+    questNextIds.get(from).add(to);
+    questPreviousIds.get(to).add(from);
+  };
+
+  questData.quests.forEach((quest) => {
+    [quest.startActions?.nextQuest, quest.rewards?.nextQuest].forEach((nextId) => {
+      if (Number.isInteger(nextId)) addQuestEdge(quest.id, nextId);
+    });
+    (quest.startConditions?.quests || []).filter((requirement) => Number(requirement.state) === 2).forEach((requirement) => addQuestEdge(requirement.id, quest.id));
+  });
+
   const dropSources = new Map();
   const rewardQuestSources = new Map();
   const useQuestSources = new Map();
@@ -134,7 +156,7 @@
     quest: {
       kicker: "QUEST INDEX", title: "全部任務流程", placeholder: "輸入任務名稱、任務 ID、NPC、物品或怪物…",
       modes: [["all", "全部"], ["name", "任務名稱"], ["npc", "NPC"], ["item", "物品"], ["mob", "怪物"]],
-      source: "任務流程由本機 <code>Quest Check</code>、<code>Quest Act</code> 與任務文字交叉整理。腳本控制、隨機獎勵或伺服器調整仍以遊戲內狀態為準。"
+      source: "任務流程與完整任務鏈由本機 <code>Quest Check</code>、<code>Quest Act</code>、已完成前置條件與任務文字交叉整理。腳本控制、隨機獎勵或伺服器調整仍以遊戲內狀態為準。"
     },
     skill: {
       kicker: "SKILL BUILD", title: "各職業技能配點", placeholder: "輸入職業、技能名稱或等級區間…",
@@ -186,6 +208,22 @@
   $("#itemStat").textContent = formatNumber(itemData.items.length);
   $("#equipmentStat").textContent = formatNumber(equipmentData.equipment.length);
   $("#questStat").textContent = formatNumber(questData.meta.questCount);
+
+  function applyTheme(nextTheme, persist = true) {
+    const theme = nextTheme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = theme;
+    themeToggle.setAttribute("aria-pressed", String(theme === "dark"));
+    themeIcon.textContent = theme === "dark" ? "☀" : "☾";
+    themeLabel.textContent = theme === "dark" ? "切換明亮" : "切換暗色";
+    if (persist) {
+      try { window.localStorage?.setItem("maple-theme", theme); } catch (_) { /* Local files may block storage. */ }
+    }
+  }
+
+  const initialTheme = document.documentElement.dataset.theme
+    || (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  applyTheme(initialTheme, false);
+  themeToggle.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 
   function itemIconHtml(itemId, large = false) {
     const id = Number(itemId);
@@ -299,7 +337,71 @@
     return `<article class="monster-card equipment-card"><div class="equipment-card__header">${itemIconHtml(item.id, true)}<div class="equipment-card__identity"><span class="category-label">${escapeHtml(item.category)}</span><h3>${escapeHtml(item.name)}</h3><span class="monster-id">ITEM ${escapeHtml(item.id)}</span></div></div>${item.description ? `<p class="item-description">${multiline(item.description)}</p>` : ""}<div class="requirement-row">${requirements.map((entry) => `<span>${escapeHtml(entry)}</span>`).join("")}</div><div class="data-group data-group--stats"><p class="data-group__title">基礎能力</p><div class="stat-grid">${statHtml}</div></div>${attributeHtml}${relationDetailsHtml(item.id)}</article>`;
   }
 
-  function questLink(questId, label = null) { return `<button class="text-link" type="button" data-chip-view="quest" data-chip-mode="all" data-chip-query="${questId}">${escapeHtml(label || `任務 ${questId}`)}</button>`; }
+  function questName(questId) {
+    return questById.get(Number(questId))?.name || `未收錄任務 ${questId}`;
+  }
+
+  function questLink(questId, label = null) {
+    return `<button class="text-link" type="button" data-chip-view="quest" data-chip-mode="all" data-chip-query="${questId}">${escapeHtml(label || questName(questId))}</button>`;
+  }
+
+  function questChainLevels(questId) {
+    const startId = Number(questId);
+    const component = new Set([startId]);
+    const pending = [startId];
+    while (pending.length) {
+      const current = pending.pop();
+      const adjacent = [...(questPreviousIds.get(current) || []), ...(questNextIds.get(current) || [])];
+      adjacent.forEach((nextId) => {
+        if (!component.has(nextId)) { component.add(nextId); pending.push(nextId); }
+      });
+    }
+
+    const indegree = new Map([...component].map((id) => [id, [...(questPreviousIds.get(id) || [])].filter((previous) => component.has(previous)).length]));
+    const depth = new Map([...component].map((id) => [id, 0]));
+    const ready = [...component].filter((id) => indegree.get(id) === 0).sort((a, b) => a - b);
+    const processed = new Set();
+    while (ready.length) {
+      const current = ready.shift();
+      processed.add(current);
+      [...(questNextIds.get(current) || [])].filter((nextId) => component.has(nextId)).sort((a, b) => a - b).forEach((nextId) => {
+        depth.set(nextId, Math.max(depth.get(nextId) || 0, (depth.get(current) || 0) + 1));
+        indegree.set(nextId, indegree.get(nextId) - 1);
+        if (indegree.get(nextId) === 0) ready.push(nextId);
+      });
+      ready.sort((a, b) => a - b);
+    }
+
+    // Cycles are unexpected, but keeping them visible is better than losing
+    // part of a chain when the source data contains a circular requirement.
+    const finalDepth = Math.max(0, ...depth.values()) + 1;
+    [...component].filter((id) => !processed.has(id)).forEach((id) => depth.set(id, finalDepth));
+    const levels = new Map();
+    [...component].sort((a, b) => (depth.get(a) || 0) - (depth.get(b) || 0) || a - b).forEach((id) => {
+      const level = depth.get(id) || 0;
+      if (!levels.has(level)) levels.set(level, []);
+      levels.get(level).push(questById.get(id));
+    });
+    return [...levels.values()];
+  }
+
+  function questRelationButtons(ids, currentId) {
+    return ids.map((id) => `<button class="quest-chain__node${Number(id) === Number(currentId) ? " is-current" : ""}" type="button" data-chip-view="quest" data-chip-mode="all" data-chip-query="${id}"><span>${escapeHtml(questName(id))}</span><small>QUEST ${id}</small></button>`).join("");
+  }
+
+  function questChainHtml(quest) {
+    const levels = questChainLevels(quest.id);
+    const total = levels.reduce((count, entries) => count + entries.length, 0);
+    const chain = levels.map((entries, index) => `<div class="quest-chain__stage"><span class="quest-chain__stage-label">${levels.length === 1 ? "獨立任務" : index === 0 ? "起點" : index === levels.length - 1 ? "終點" : `第 ${index + 1} 階段`}</span><div class="quest-chain__nodes">${questRelationButtons(entries.map((entry) => entry.id), quest.id)}</div></div>${index < levels.length - 1 ? '<span class="quest-chain__arrow" aria-hidden="true">↓</span>' : ""}`).join("");
+    return `<details class="quest-chain"><summary>查看完整任務鏈 <span>${total} 個任務</span></summary><div class="quest-chain__body">${chain}</div></details>`;
+  }
+
+  function immediateQuestRelationsHtml(quest) {
+    const previous = [...(questPreviousIds.get(Number(quest.id)) || [])].sort((a, b) => a - b);
+    const next = [...(questNextIds.get(Number(quest.id)) || [])].sort((a, b) => a - b);
+    if (!previous.length && !next.length) return '<p class="quest-chain-status">本機資料沒有記錄此任務的前後任務。</p>';
+    return `<div class="quest-relations">${previous.length ? `<div><span>前置任務</span><div>${previous.map((id) => questLink(id)).join("、")}</div></div>` : ""}${next.length ? `<div><span>下一個任務</span><div>${next.map((id) => questLink(id)).join("、")}</div></div>` : ""}</div>`;
+  }
 
   function conditionHtml(condition, includeTargets = true) {
     const pieces = [];
@@ -307,7 +409,7 @@
     if (condition.lvmax) pieces.push(`等級不超過 ${condition.lvmax}`);
     if (condition.pop) pieces.push(`名聲至少 ${condition.pop}`);
     if (condition.jobs?.length && !(condition.jobs.length === 1 && condition.jobs[0] === 0)) pieces.push(`職業：${condition.jobs.map(jobLabel).join("、")}`);
-    if (condition.quests?.length) pieces.push(`前置：${condition.quests.map((entry) => questLink(entry.id, `${entry.id}（狀態 ${entry.state}）`)).join("、")}`);
+    if (condition.quests?.length) pieces.push(`前置：${condition.quests.map((entry) => questLink(entry.id, `${questName(entry.id)}（狀態 ${entry.state}）`)).join("、")}`);
     const basics = pieces.length ? `<div class="flow-pills">${pieces.map((piece) => `<span>${piece}</span>`).join("")}</div>` : "";
     if (!includeTargets) return basics;
     const targets = [];
@@ -337,7 +439,7 @@
     const startActions = actionHtml(quest.startActions);
     const hasStartAction = Object.keys(quest.startActions || {}).length > 0;
     const objective = quest.objective || quest.summary || "本機文字沒有額外目標說明。";
-    return `<article class="monster-card quest-card"><div class="monster-card__top"><div><span class="category-label">${escapeHtml(quest.parent || "一般任務")}</span><h3>${escapeHtml(quest.name)}</h3><span class="monster-id">QUEST ${quest.id}</span></div></div><div class="quest-flow"><section class="flow-step"><span class="flow-step__number">1</span><div><p class="flow-step__title">接取任務</p><div class="npc-label">${npcLabel(quest.startNpc)}</div>${conditionHtml(quest.startConditions, false)}${hasStartAction ? `<div class="flow-subsection"><span>接取時變動</span>${startActions}</div>` : ""}</div></section><section class="flow-step"><span class="flow-step__number">2</span><div><p class="flow-step__title">完成目標</p><p class="flow-copy">${multiline(objective)}</p>${conditionHtml(quest.finishConditions, true)}</div></section><section class="flow-step"><span class="flow-step__number">3</span><div><p class="flow-step__title">回報任務</p><div class="npc-label">${npcLabel(quest.finishNpc)}</div></div></section><section class="flow-step flow-step--reward"><span class="flow-step__number">4</span><div><p class="flow-step__title">獎勵與變動</p>${actionHtml(quest.rewards)}</div></section></div>${quest.completion ? `<details class="card-details"><summary>查看完成後紀錄</summary><div class="card-details__body flow-copy">${multiline(quest.completion)}</div></details>` : ""}</article>`;
+    return `<article class="monster-card quest-card"><div class="monster-card__top"><div><span class="category-label">${escapeHtml(quest.parent || "一般任務")}</span><h3>${escapeHtml(quest.name)}</h3><span class="monster-id">QUEST ${quest.id}</span></div></div>${immediateQuestRelationsHtml(quest)}<div class="quest-flow"><section class="flow-step"><span class="flow-step__number">1</span><div><p class="flow-step__title">接取任務</p><div class="npc-label">${npcLabel(quest.startNpc)}</div>${conditionHtml(quest.startConditions, false)}${hasStartAction ? `<div class="flow-subsection"><span>接取時變動</span>${startActions}</div>` : ""}</div></section><section class="flow-step"><span class="flow-step__number">2</span><div><p class="flow-step__title">完成目標</p><p class="flow-copy">${multiline(objective)}</p>${conditionHtml(quest.finishConditions, true)}</div></section><section class="flow-step"><span class="flow-step__number">3</span><div><p class="flow-step__title">回報任務</p><div class="npc-label">${npcLabel(quest.finishNpc)}</div></div></section><section class="flow-step flow-step--reward"><span class="flow-step__number">4</span><div><p class="flow-step__title">獎勵與變動</p>${actionHtml(quest.rewards)}</div></section></div>${questChainHtml(quest)}${quest.completion ? `<details class="card-details"><summary>查看完成後紀錄</summary><div class="card-details__body flow-copy">${multiline(quest.completion)}</div></details>` : ""}</article>`;
   }
 
   function skillStepHtml(step, index) {

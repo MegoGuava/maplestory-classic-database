@@ -3,9 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="description" content="從楓之谷經典服本機資料整理的道具、裝備、怪物掉落、任務流程與職業技能查詢工具。" />
     <title>楓之谷經典服・個人資料查詢</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("maple-theme");
+        const preferredTheme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = savedTheme || preferredTheme;
+      } catch (_) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -13,7 +22,13 @@
       <div class="hero__glow hero__glow--one"></div>
       <div class="hero__glow hero__glow--two"></div>
       <div class="shell hero__content">
-        <div class="eyebrow"><span></span>LOCAL CLASSIC DATABASE</div>
+        <div class="hero__toolbar">
+          <div class="eyebrow"><span></span>LOCAL CLASSIC DATABASE</div>
+          <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="切換深色或明亮介面">
+            <span id="themeIcon" class="theme-toggle__icon" aria-hidden="true">☾</span>
+            <span id="themeLabel">切換暗色</span>
+          </button>
+        </div>
         <h1>楓之谷經典服<br /><em>個人資料查詢</em></h1>
         <p class="hero__copy">直接讀取經典版本機資源整理而成。道具、裝備、掉落怪物與任務來源可互相跳轉，另收錄五大職業一、二轉技能配點。</p>
 
