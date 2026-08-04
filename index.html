@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="從楓之谷經典服本機資料整理的道具、裝備、怪物掉落、任務流程與職業技能查詢工具。" />
+    <title>楓之谷經典服・個人資料查詢</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__glow hero__glow--one"></div>
+      <div class="hero__glow hero__glow--two"></div>
+      <div class="shell hero__content">
+        <div class="eyebrow"><span></span>LOCAL CLASSIC DATABASE</div>
+        <h1>楓之谷經典服<br /><em>個人資料查詢</em></h1>
+        <p class="hero__copy">直接讀取經典版本機資源整理而成。道具、裝備、掉落怪物與任務來源可互相跳轉，另收錄五大職業一、二轉技能配點。</p>
+
+        <nav class="view-switch" aria-label="資料種類">
+          <button class="view-switch__button is-active" type="button" data-view="drop"><span>01</span>怪物掉落</button>
+          <button class="view-switch__button" type="button" data-view="item"><span>02</span>道具圖鑑</button>
+          <button class="view-switch__button" type="button" data-view="equipment"><span>03</span>裝備能力</button>
+          <button class="view-switch__button" type="button" data-view="quest"><span>04</span>任務流程</button>
+          <button class="view-switch__button" type="button" data-view="skill"><span>05</span>職業配點</button>
+        </nav>
+
+        <section class="search-panel" aria-label="資料查詢">
+          <label class="search-box" for="searchInput">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.15a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
+            <input id="searchInput" type="search" autocomplete="off" placeholder="輸入怪物、物品、地圖名稱或 ID…" />
+            <kbd>Ctrl K</kbd>
+          </label>
+          <div id="modeSwitch" class="mode-switch" role="group" aria-label="查詢範圍"></div>
+        </section>
+
+        <div class="stats" aria-label="資料統計">
+          <div><strong id="monsterStat">—</strong><span>圖鑑怪物</span></div>
+          <div><strong id="itemStat">—</strong><span>非裝備道具</span></div>
+          <div><strong id="equipmentStat">—</strong><span>裝備資料</span></div>
+          <div><strong id="questStat">—</strong><span>任務流程</span></div>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell content">
+      <div class="result-heading">
+        <div>
+          <p id="sectionKicker" class="section-kicker">MONSTER INDEX</p>
+          <h2 id="resultTitle">全部圖鑑怪物</h2>
+        </div>
+        <p id="resultSummary" class="result-summary" aria-live="polite"></p>
+      </div>
+
+      <div id="emptyState" class="empty-state" hidden>
+        <div class="empty-state__icon">?</div>
+        <h3>沒有找到符合的資料</h3>
+        <p>可改用中文名稱、編號，或縮短關鍵字再查一次。</p>
+        <button id="clearSearch" class="outline-button" type="button">清除查詢</button>
+      </div>
+
+      <section id="results" class="result-grid" aria-label="查詢結果"></section>
+      <div class="load-more-wrap">
+        <button id="loadMore" class="load-more" type="button" hidden>載入更多</button>
+      </div>
+
+      <aside class="source-note">
+        <div class="source-note__mark">i</div>
+        <div>
+          <h3 id="sourceTitle">資料來源與限制</h3>
+          <p id="sourceCopy">掉落與地圖來自本機 <code>MonsterBook</code> 圖鑑；原始檔沒有掉落機率，因此不顯示機率。伺服器仍可能另外調整實際內容。</p>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <div class="shell"><span>經典服個人資料查詢</span><span>非官方玩家工具</span></div>
+    </footer>
+
+    <script src="data.js"></script>
+    <script src="item-data.js"></script>
+    <script src="equipment-data.js"></script>
+    <script src="quest-data.js"></script>
+    <script src="skill-build-data.js"></script>
+    <script src="icon-data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
