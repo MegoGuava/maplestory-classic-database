@@ -127,6 +127,7 @@ h1 em { color: var(--lime); font-style: normal; }
   color: rgba(255, 255, 255, 0.68);
   background: transparent;
   font-weight: 700;
+  text-decoration: none;
   cursor: pointer;
   white-space: nowrap;
 }
