@@ -12,6 +12,7 @@
     startExp: $("#startExp"), currentExp: $("#currentExp"), gainedExp: $("#gainedExp"), hourlyRate: $("#hourlyRate"), lastDetected: $("#lastDetected"),
     startSession: $("#startSession"), stopSession: $("#stopSession"), resetSession: $("#resetSession"),
     shareWindow: $("#shareWindow"), autoFindExp: $("#autoFindExp"), stopCapture: $("#stopCapture"), clearRegion: $("#clearRegion"),
+    zoomOut: $("#zoomOut"), zoomIn: $("#zoomIn"), zoomReset: $("#zoomReset"), previewZoom: $("#previewZoom"), zoomValue: $("#zoomValue"),
     captureVideo: $("#captureVideo"), previewCanvas: $("#previewCanvas"), previewShell: $("#previewShell"), previewEmpty: $("#previewEmpty"), regionHelp: $("#regionHelp"),
     readingFormat: $("#readingFormat"), maxExp: $("#maxExp"), scanInterval: $("#scanInterval"),
     startDetection: $("#startDetection"), stopDetection: $("#stopDetection"), detectionStatus: $("#detectionStatus"), ocrProgress: $("#ocrProgress"),
@@ -48,6 +49,8 @@
     ocrSelection: null,
     detectionRunning: false,
     findingPanel: false,
+    locatorRunId: 0,
+    previewZoom: 1,
     scanTimer: null,
     ocrWorker: null,
     ocrWorkerPromise: null,
@@ -250,6 +253,28 @@
     return state.dragStart && state.dragCurrent ? normalizedRegion(state.dragStart, state.dragCurrent) : state.selection;
   }
 
+  function applyPreviewZoom(percent) {
+    const nextPercent = Math.max(100, Math.min(400, Math.round(Number(percent) / 25) * 25 || 100));
+    state.previewZoom = nextPercent / 100;
+    elements.previewZoom.value = String(nextPercent);
+    elements.zoomValue.value = `${nextPercent}%`;
+    elements.zoomValue.textContent = `${nextPercent}%`;
+    elements.previewCanvas.style.width = `${nextPercent}%`;
+    elements.zoomOut.disabled = !state.captureStream || nextPercent <= 100;
+    elements.zoomIn.disabled = !state.captureStream || nextPercent >= 400;
+  }
+
+  function centerSelectionInPreview() {
+    if (!state.selection) return;
+    const canvas = elements.previewCanvas;
+    const shell = elements.previewShell;
+    shell.scrollTo({
+      left: Math.max(0, state.selection.x * canvas.scrollWidth + state.selection.width * canvas.scrollWidth / 2 - shell.clientWidth / 2),
+      top: Math.max(0, state.selection.y * canvas.scrollHeight + state.selection.height * canvas.scrollHeight / 2 - shell.clientHeight / 2),
+      behavior: "smooth"
+    });
+  }
+
   function drawPreview() {
     const video = elements.captureVideo;
     const canvas = elements.previewCanvas;
@@ -286,19 +311,27 @@
     elements.autoFindExp.disabled = !hasCapture || state.findingPanel || !panelDetector;
     elements.stopCapture.disabled = !hasCapture;
     elements.clearRegion.disabled = !hasCapture;
+    elements.previewZoom.disabled = !hasCapture;
+    elements.zoomReset.disabled = !hasCapture;
+    elements.zoomOut.disabled = !hasCapture || state.previewZoom <= 1;
+    elements.zoomIn.disabled = !hasCapture || state.previewZoom >= 4;
     elements.startDetection.disabled = !hasCapture || !hasRegion || state.detectionRunning || state.findingPanel;
     elements.stopDetection.disabled = !state.detectionRunning;
     elements.previewShell.dataset.empty = String(!hasCapture);
     if (!hasCapture) elements.previewEmpty.hidden = false;
   }
 
-  function autoFindExpPanel() {
+  const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+  async function autoFindExpPanel() {
     const video = elements.captureVideo;
     if (!state.captureStream || !video.videoWidth || !video.videoHeight) return;
     if (!panelDetector) {
       setDetectionStatus("自動尋找元件載入失敗", "error", "請改用手動框選 EXP 區域。");
       return;
     }
+    const capture = state.captureStream;
+    const runId = ++state.locatorRunId;
     stopDetection();
     state.findingPanel = true;
     state.selection = null;
@@ -308,12 +341,23 @@
 
     try {
       const canvas = ocrCanvases.locator;
-      const scale = Math.min(1, 1600 / video.videoWidth);
+      const scale = Math.min(1, 1920 / video.videoWidth);
       canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
       canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
       const context = canvas.getContext("2d", { willReadFrequently: true });
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const match = panelDetector.findExpPanel(context.getImageData(0, 0, canvas.width, canvas.height));
+      let match = null;
+      const attempts = 6;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        if (state.captureStream !== capture || state.locatorRunId !== runId) return;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const candidate = panelDetector.findExpPanel(context.getImageData(0, 0, canvas.width, canvas.height));
+        if (candidate && (!match || candidate.confidence > match.confidence)) match = candidate;
+        if (candidate?.confidence >= 0.58) break;
+        if (attempt < attempts) {
+          setDetectionStatus(`正在自動尋找 EXP（${attempt}/${attempts}）`, "working", "正在比對 EXP 文字外框與綠色經驗條，請保持遊戲視窗可見。");
+          await wait(300);
+        }
+      }
       if (!match) {
         setDetectionStatus("沒有自動找到 EXP", "error", "請在彩色預覽上手動拖曳，框住 EXP 文字與下方長條。");
         return;
@@ -332,12 +376,15 @@
         height: Math.max(1, textBottom - match.y) / canvas.height
       };
       state.preferredOcrVariant = "color";
-      setDetectionStatus("已自動找到 EXP 區塊", "working", "綠色框顯示整個面板；OCR 只會讀取上方 EXP 數字。");
+      setDetectionStatus("已自動找到 EXP 區塊", "working", `綠色框顯示整個面板；定位信心 ${Math.round(match.confidence * 100)}%。`);
+      window.setTimeout(centerSelectionInPreview, 0);
     } catch (error) {
       setDetectionStatus("自動尋找發生錯誤", "error", error?.message || "請改用手動框選 EXP 區域。");
     } finally {
-      state.findingPanel = false;
-      updateCaptureControls();
+      if (state.locatorRunId === runId) {
+        state.findingPanel = false;
+        updateCaptureControls();
+      }
     }
   }
 
@@ -384,6 +431,7 @@
     state.dragStart = null;
     state.dragCurrent = null;
     state.findingPanel = false;
+    state.locatorRunId += 1;
     elements.captureVideo.srcObject = null;
     cancelAnimationFrame(state.previewFrame);
     elements.previewShell.dataset.empty = "true";
@@ -624,6 +672,13 @@
     setDetectionStatus("請在預覽上拖曳 EXP 範圍", "working", "框選完成後即可重新啟動自動辨識。");
     updateCaptureControls();
   });
+  elements.previewZoom.addEventListener("input", () => applyPreviewZoom(elements.previewZoom.value));
+  elements.zoomOut.addEventListener("click", () => applyPreviewZoom(state.previewZoom * 100 - 25));
+  elements.zoomIn.addEventListener("click", () => applyPreviewZoom(state.previewZoom * 100 + 25));
+  elements.zoomReset.addEventListener("click", () => {
+    applyPreviewZoom(100);
+    elements.previewShell.scrollTo({ left: 0, top: 0, behavior: "smooth" });
+  });
   elements.startDetection.addEventListener("click", startDetection);
   elements.stopDetection.addEventListener("click", stopDetection);
   elements.applyManual.addEventListener("click", () => {
@@ -660,6 +715,7 @@
 
   loadSettings();
   renderHistory();
+  applyPreviewZoom(100);
   updateCaptureControls();
   updateSessionUI();
 })();

@@ -60,8 +60,19 @@
 .xp-card__heading > span { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 12px; color: #173f34; background: var(--lime); font-family: Consolas, monospace; font-size: 0.75rem; font-weight: 900; }
 .xp-card__heading p { margin: 7px 0 0; color: var(--muted); font-size: calc(0.75rem + 2pt); line-height: 1.6; }
 
-.xp-preview-shell { position: relative; display: grid; min-height: 315px; margin-top: 17px; overflow: hidden; place-items: center; border: 1px dashed #aebdb7; border-radius: 16px; background: #071512; }
-.xp-preview-shell canvas { display: block; width: 100%; max-height: 620px; object-fit: contain; cursor: crosshair; touch-action: none; }
+.xp-zoom-controls { display: grid; grid-template-columns: auto 38px minmax(110px, 1fr) 50px 38px auto; align-items: center; gap: 8px; margin-top: 15px; padding: 10px 12px; border: 1px solid #dde5dd; border-radius: 12px; background: #f8faf3; }
+.xp-zoom-controls > span { color: #5f716b; font-size: 0.72rem; font-weight: 850; }
+.xp-zoom-controls input { width: 100%; accent-color: #6f9631; cursor: pointer; }
+.xp-zoom-controls input:disabled { cursor: not-allowed; opacity: 0.45; }
+.xp-zoom-controls output { color: #36522f; font-family: Consolas, monospace; font-size: 0.75rem; font-weight: 850; text-align: center; }
+.xp-zoom-button, .xp-zoom-reset { min-height: 34px; border: 1px solid #bdcbc4; border-radius: 8px; color: #29443d; background: #fffef9; font-weight: 900; cursor: pointer; }
+.xp-zoom-button { padding: 3px 8px; font-size: 1rem; }
+.xp-zoom-reset { padding: 5px 10px; font-size: 0.7rem; }
+.xp-zoom-button:hover:not(:disabled), .xp-zoom-reset:hover:not(:disabled) { border-color: #719232; background: #eff6df; }
+.xp-zoom-button:disabled, .xp-zoom-reset:disabled { cursor: not-allowed; opacity: 0.4; }
+
+.xp-preview-shell { position: relative; min-height: 315px; max-height: 620px; margin-top: 12px; overflow: auto; border: 1px dashed #aebdb7; border-radius: 16px; background: #071512; scrollbar-color: #70857d #10231e; }
+.xp-preview-shell canvas { display: block; width: 100%; max-width: none; height: auto; margin: 0 auto; cursor: crosshair; touch-action: none; user-select: none; }
 .xp-preview-shell[data-empty="true"] canvas { visibility: hidden; }
 .xp-preview-empty { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 8px; padding: 25px; color: #b9c9c3; text-align: center; }
 .xp-preview-empty strong { color: #e8f4ef; font-size: 1rem; }
@@ -123,6 +134,11 @@
 :root[data-theme="dark"] .xp-manual-entry p,
 :root[data-theme="dark"] .xp-empty-history { color: var(--muted); }
 :root[data-theme="dark"] .xp-preview-shell { border-color: #4b625a; }
+:root[data-theme="dark"] .xp-zoom-controls { border-color: #344a42; background: #10201b; }
+:root[data-theme="dark"] .xp-zoom-controls > span { color: #a9bbb5; }
+:root[data-theme="dark"] .xp-zoom-controls output { color: #d6eda4; }
+:root[data-theme="dark"] .xp-zoom-button,
+:root[data-theme="dark"] .xp-zoom-reset { border-color: #50675e; color: #c9ddd6; background: #162923; }
 :root[data-theme="dark"] .xp-form-grid input,
 :root[data-theme="dark"] .xp-form-grid select,
 :root[data-theme="dark"] .xp-manual-entry input { border-color: #3b5149; color: var(--ink); background: #10201b; }
@@ -153,4 +169,6 @@
   .xp-detection-state { grid-template-columns: 1fr; }
   .xp-manual-entry > div { grid-template-columns: 1fr; }
   .xp-preview-shell { min-height: 210px; }
+  .xp-zoom-controls { grid-template-columns: auto 36px minmax(80px, 1fr) 46px 36px; }
+  .xp-zoom-reset { grid-column: 1 / -1; }
 }
