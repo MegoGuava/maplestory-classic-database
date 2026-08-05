@@ -294,12 +294,21 @@
     }
     stopCapture();
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 5, max: 10 } }, audio: false });
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          frameRate: { ideal: 5, max: 10 },
+          width: { ideal: 3840 },
+          height: { ideal: 2160 }
+        },
+        audio: false
+      });
       state.captureStream = stream;
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack && "contentHint" in videoTrack) videoTrack.contentHint = "text";
       elements.captureVideo.srcObject = stream;
       await elements.captureVideo.play();
       state.selection = null;
-      stream.getVideoTracks()[0]?.addEventListener("ended", stopCapture, { once: true });
+      videoTrack?.addEventListener("ended", stopCapture, { once: true });
       cancelAnimationFrame(state.previewFrame);
       drawPreview();
       setDetectionStatus("畫面已連接，請框選 EXP", "working", "在彩色預覽上拖曳，只框住一行 EXP 數字或百分比。");
@@ -368,11 +377,11 @@
     const sourceY = Math.round(region.y * video.videoHeight);
     const sourceWidth = Math.max(1, Math.round(region.width * video.videoWidth));
     const sourceHeight = Math.max(1, Math.round(region.height * video.videoHeight));
-    let scale = Math.min(6, Math.max(2, 1100 / sourceWidth, 120 / sourceHeight));
-    if (sourceWidth * scale > 2600) scale = 2600 / sourceWidth;
+    let scale = Math.min(10, Math.max(3, 1500 / sourceWidth, 180 / sourceHeight));
+    if (sourceWidth * scale > 4800) scale = 4800 / sourceWidth;
     const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
-    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
-    const padding = Math.max(16, Math.min(40, Math.round(targetHeight * 0.22)));
+    const targetHeight = Math.max(140, Math.round(sourceHeight * scale));
+    const padding = Math.max(18, Math.min(48, Math.round(targetHeight * 0.22)));
 
     const source = ocrCanvases.source;
     source.width = targetWidth;

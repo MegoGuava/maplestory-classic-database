@@ -28,8 +28,6 @@
 .xp-hero .eyebrow { margin-bottom: 18px; }
 .xp-hero h1 { max-width: 780px; font-size: clamp(3.4rem, 8vw, 6.7rem); }
 .xp-hero__copy { max-width: 720px; margin: 27px 0 28px; color: rgba(245, 255, 249, 0.84); font-size: calc(1rem + 2pt); line-height: 1.75; }
-.xp-trust-row { display: flex; flex-wrap: wrap; gap: 9px; }
-.xp-trust-row span { padding: 8px 11px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 999px; color: #d9eee5; background: rgba(4, 31, 26, 0.34); font-size: 0.72rem; font-weight: 750; }
 
 .xp-main { padding-top: 45px; padding-bottom: 65px; }
 .xp-session, .xp-card { border: 1px solid var(--line); border-radius: 22px; background: var(--paper); box-shadow: 0 8px 28px rgba(18, 54, 46, 0.06); }
