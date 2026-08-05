@@ -127,6 +127,47 @@
     return winner;
   }
 
+  function rowCandidates(binary, width, top) {
+    const candidates = new Array(width - 4);
+    for (let left = 0; left < candidates.length; left += 1) candidates[left] = bestDigit(binary, width, left, top);
+    return candidates;
+  }
+
+  function bestShortRun(candidates, startMin, startMax, maxDigits) {
+    let winner = null;
+    const visit = (position, text, scores, positions) => {
+      const candidate = candidates[position];
+      if (!candidate || candidate.score < 0.64) return;
+      const nextText = text + candidate.digit;
+      const nextScores = [...scores, candidate.score];
+      const nextPositions = [...positions, position];
+      const average = nextScores.reduce((sum, score) => sum + score, 0) / nextScores.length;
+      const run = { text: nextText, scores: nextScores, positions: nextPositions, average };
+      if (!winner || run.text.length > winner.text.length || (run.text.length === winner.text.length && run.average > winner.average)) winner = run;
+      if (nextText.length >= maxDigits) return;
+      for (const advance of [5, 6]) if (position + advance < candidates.length) visit(position + advance, nextText, nextScores, nextPositions);
+    };
+    for (let start = Math.max(0, startMin); start <= Math.min(candidates.length - 1, startMax); start += 1) visit(start, "", [], []);
+    return winner?.average >= 0.7 ? winner : null;
+  }
+
+  function percentageFromObservation(imageData, observation) {
+    const sampled = downsample(imageData, observation.scale, observation.offsetX, observation.offsetY);
+    if (!sampled || observation.top > sampled.height - 7) return null;
+    const binary = new Uint8Array(sampled.values.length);
+    for (let index = 0; index < sampled.values.length; index += 1) binary[index] = sampled.values[index] >= observation.threshold ? 1 : 0;
+    const candidates = rowCandidates(binary, sampled.width, observation.top);
+    const currentEnd = observation.positions[observation.positions.length - 1] + 5;
+    const integerRun = bestShortRun(candidates, currentEnd + 1, currentEnd + 8, 3);
+    if (!integerRun) return null;
+    const integerEnd = integerRun.positions[integerRun.positions.length - 1];
+    const fractionRun = bestShortRun(candidates, integerEnd + 7, integerEnd + 11, 2);
+    if (!fractionRun || fractionRun.text.length !== 2) return null;
+    const value = Number(`${integerRun.text}.${fractionRun.text}`);
+    if (!Number.isFinite(value) || value < 0 || value > 100) return null;
+    return { text: `${integerRun.text}.${fractionRun.text}`, value, score: (integerRun.average + fractionRun.average) / 2 };
+  }
+
   function recognize(imageData) {
     if (!imageData?.data || !Number(imageData.width) || !Number(imageData.height)) return null;
     const maxScale = Math.max(1, Math.min(4, Math.floor(imageData.height / 7)));
@@ -173,13 +214,28 @@
     }).sort((left, right) => right.rank - left.rank || right.bestScore - left.bestScore || left.left - right.left);
     const winner = ranked[0];
     if (!winner || winner.average < MIN_RUN_SCORE || winner.support < 3) return null;
+    const percentageGroups = new Map();
+    for (const observation of winner.observations) {
+      const percentage = percentageFromObservation(imageData, observation);
+      if (!percentage) continue;
+      const group = percentageGroups.get(percentage.text) || { ...percentage, support: 0, scoreTotal: 0 };
+      group.support += 1;
+      group.scoreTotal += percentage.score;
+      percentageGroups.set(percentage.text, group);
+    }
+    const percentage = [...percentageGroups.values()]
+      .map((group) => ({ ...group, average: group.scoreTotal / group.support }))
+      .sort((left, right) => right.support - left.support || right.average - left.average)[0];
+    const reliablePercentage = percentage?.support >= 3 ? percentage : null;
     const confidence = Math.round(Math.min(98, 35 + winner.average * 50 + Math.min(12, winner.support * 1.5)));
     return {
-      text: winner.text,
+      text: reliablePercentage ? `${winner.text}(${reliablePercentage.text}%)` : winner.text,
       confidence,
       support: winner.support,
       average: winner.average,
-      scale: winner.observations[0]?.scale || 1
+      scale: winner.observations[0]?.scale || 1,
+      percentage: reliablePercentage?.value ?? null,
+      percentageSupport: reliablePercentage?.support || 0
     };
   }
 
