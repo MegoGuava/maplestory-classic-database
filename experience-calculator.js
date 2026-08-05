@@ -2,6 +2,7 @@
   "use strict";
 
   const core = window.MapleExpCalculatorCore;
+  const panelDetector = window.MapleExpPanelDetector;
   if (!core) return;
 
   const $ = (selector) => document.querySelector(selector);
@@ -10,7 +11,7 @@
     sessionStatus: $("#sessionStatus"), startTime: $("#startTime"), endTime: $("#endTime"), duration: $("#duration"),
     startExp: $("#startExp"), currentExp: $("#currentExp"), gainedExp: $("#gainedExp"), hourlyRate: $("#hourlyRate"), lastDetected: $("#lastDetected"),
     startSession: $("#startSession"), stopSession: $("#stopSession"), resetSession: $("#resetSession"),
-    shareWindow: $("#shareWindow"), stopCapture: $("#stopCapture"), clearRegion: $("#clearRegion"),
+    shareWindow: $("#shareWindow"), autoFindExp: $("#autoFindExp"), stopCapture: $("#stopCapture"), clearRegion: $("#clearRegion"),
     captureVideo: $("#captureVideo"), previewCanvas: $("#previewCanvas"), previewShell: $("#previewShell"), previewEmpty: $("#previewEmpty"), regionHelp: $("#regionHelp"),
     readingFormat: $("#readingFormat"), maxExp: $("#maxExp"), scanInterval: $("#scanInterval"),
     startDetection: $("#startDetection"), stopDetection: $("#stopDetection"), detectionStatus: $("#detectionStatus"), ocrProgress: $("#ocrProgress"),
@@ -20,6 +21,7 @@
 
   const ocrCanvases = {
     source: document.createElement("canvas"),
+    locator: document.createElement("canvas"),
     color: document.createElement("canvas"),
     enhanced: document.createElement("canvas"),
     text: document.createElement("canvas")
@@ -43,7 +45,9 @@
     selection: null,
     dragStart: null,
     dragCurrent: null,
+    ocrSelection: null,
     detectionRunning: false,
+    findingPanel: false,
     scanTimer: null,
     ocrWorker: null,
     ocrWorkerPromise: null,
@@ -279,12 +283,62 @@
   function updateCaptureControls() {
     const hasCapture = Boolean(state.captureStream);
     const hasRegion = Boolean(state.selection && state.selection.width >= 0.02 && state.selection.height >= 0.015);
+    elements.autoFindExp.disabled = !hasCapture || state.findingPanel || !panelDetector;
     elements.stopCapture.disabled = !hasCapture;
     elements.clearRegion.disabled = !hasCapture;
-    elements.startDetection.disabled = !hasCapture || !hasRegion || state.detectionRunning;
+    elements.startDetection.disabled = !hasCapture || !hasRegion || state.detectionRunning || state.findingPanel;
     elements.stopDetection.disabled = !state.detectionRunning;
     elements.previewShell.dataset.empty = String(!hasCapture);
     if (!hasCapture) elements.previewEmpty.hidden = false;
+  }
+
+  function autoFindExpPanel() {
+    const video = elements.captureVideo;
+    if (!state.captureStream || !video.videoWidth || !video.videoHeight) return;
+    if (!panelDetector) {
+      setDetectionStatus("自動尋找元件載入失敗", "error", "請改用手動框選 EXP 區域。");
+      return;
+    }
+    stopDetection();
+    state.findingPanel = true;
+    state.selection = null;
+    state.ocrSelection = null;
+    setDetectionStatus("正在自動尋找 EXP", "working", "掃描遊戲畫面下半部的 EXP 文字與長條外框。");
+    updateCaptureControls();
+
+    try {
+      const canvas = ocrCanvases.locator;
+      const scale = Math.min(1, 1600 / video.videoWidth);
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const match = panelDetector.findExpPanel(context.getImageData(0, 0, canvas.width, canvas.height));
+      if (!match) {
+        setDetectionStatus("沒有自動找到 EXP", "error", "請在彩色預覽上手動拖曳，框住 EXP 文字與下方長條。");
+        return;
+      }
+      state.selection = {
+        x: match.x / canvas.width,
+        y: match.y / canvas.height,
+        width: match.width / canvas.width,
+        height: match.height / canvas.height
+      };
+      const textBottom = Math.min(match.y + match.height, match.bar.y + 2);
+      state.ocrSelection = {
+        x: match.x / canvas.width,
+        y: match.y / canvas.height,
+        width: match.width / canvas.width,
+        height: Math.max(1, textBottom - match.y) / canvas.height
+      };
+      state.preferredOcrVariant = "color";
+      setDetectionStatus("已自動找到 EXP 區塊", "working", "綠色框顯示整個面板；OCR 只會讀取上方 EXP 數字。");
+    } catch (error) {
+      setDetectionStatus("自動尋找發生錯誤", "error", error?.message || "請改用手動框選 EXP 區域。");
+    } finally {
+      state.findingPanel = false;
+      updateCaptureControls();
+    }
   }
 
   async function shareWindow() {
@@ -308,11 +362,13 @@
       elements.captureVideo.srcObject = stream;
       await elements.captureVideo.play();
       state.selection = null;
+      state.ocrSelection = null;
       videoTrack?.addEventListener("ended", stopCapture, { once: true });
       cancelAnimationFrame(state.previewFrame);
       drawPreview();
-      setDetectionStatus("畫面已連接，請框選 EXP", "working", "在彩色預覽上拖曳，只框住一行 EXP 數字或百分比。");
+      setDetectionStatus("畫面已連接，準備尋找 EXP", "working", "正在等待遊戲畫面清晰後自動定位。");
       updateCaptureControls();
+      window.setTimeout(() => { if (state.captureStream === stream) autoFindExpPanel(); }, 300);
     } catch (error) {
       if (error?.name === "NotAllowedError") setDetectionStatus("已取消或拒絕分享畫面", "error", "只有你再次按下按鈕並同意後，網站才可讀取畫面。");
       else setDetectionStatus("無法讀取分享畫面", "error", error?.message || "請重試並選擇遊戲視窗。");
@@ -324,8 +380,10 @@
     state.captureStream?.getTracks().forEach((track) => track.stop());
     state.captureStream = null;
     state.selection = null;
+    state.ocrSelection = null;
     state.dragStart = null;
     state.dragCurrent = null;
+    state.findingPanel = false;
     elements.captureVideo.srcObject = null;
     cancelAnimationFrame(state.previewFrame);
     elements.previewShell.dataset.empty = "true";
@@ -371,7 +429,7 @@
 
   function buildOcrFrames() {
     const video = elements.captureVideo;
-    const region = state.selection;
+    const region = state.ocrSelection || state.selection;
     if (!video.videoWidth || !region) return null;
     const sourceX = Math.round(region.x * video.videoWidth);
     const sourceY = Math.round(region.y * video.videoHeight);
@@ -446,7 +504,7 @@
         }
       });
       await worker.setParameters({
-        tessedit_char_whitelist: "0123456789.,/%OQILSBZGD",
+        tessedit_char_whitelist: "0123456789.,/%()OQILSBZGD",
         tessedit_pageseg_mode: "7",
         preserve_interword_spaces: "1",
         user_defined_dpi: "300"
@@ -545,6 +603,7 @@
     state.dragCurrent = null;
     if (region.width >= 0.02 && region.height >= 0.015) {
       state.selection = region;
+      state.ocrSelection = null;
       stopDetection();
       setDetectionStatus("已更新辨識範圍", "working", "確認框內只包含 EXP 數字後，按下開始自動辨識。");
     }
@@ -556,10 +615,12 @@
   elements.stopSession.addEventListener("click", stopSession);
   elements.resetSession.addEventListener("click", resetSession);
   elements.shareWindow.addEventListener("click", shareWindow);
+  elements.autoFindExp.addEventListener("click", autoFindExpPanel);
   elements.stopCapture.addEventListener("click", stopCapture);
   elements.clearRegion.addEventListener("click", () => {
     stopDetection();
     state.selection = null;
+    state.ocrSelection = null;
     setDetectionStatus("請在預覽上拖曳 EXP 範圍", "working", "框選完成後即可重新啟動自動辨識。");
     updateCaptureControls();
   });

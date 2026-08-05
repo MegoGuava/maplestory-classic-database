@@ -16,10 +16,11 @@
       }
     </script>
     <link rel="stylesheet" href="styles.css?v=20260805" />
-    <link rel="stylesheet" href="experience-calculator.css?v=20260805-3" />
-    <script defer src="experience-core.js?v=20260805-3"></script>
+    <link rel="stylesheet" href="experience-calculator.css?v=20260805-4" />
+    <script defer src="experience-core.js?v=20260805-4"></script>
+    <script defer src="experience-panel-detector.js?v=20260805-4"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js" integrity="sha384-2BQ3U3OdKOb0Uczxqr41I9UvZkzr4V9Hv8uSzMMZAlmhsFClvdZX5wi5fDCzG+tM" crossorigin="anonymous"></script>
-    <script defer src="experience-calculator.js?v=20260805-3"></script>
+    <script defer src="experience-calculator.js?v=20260805-4"></script>
   </head>
   <body class="xp-page">
     <header class="xp-hero">
@@ -69,11 +70,12 @@
         <section class="xp-card xp-capture-card" aria-labelledby="captureTitle">
           <div class="xp-card__heading">
             <span>01</span>
-            <div><h2 id="captureTitle">分享並框選 EXP</h2><p>分享遊戲視窗後，請用滑鼠拖曳並只框住一行 EXP 數字或百分比。</p></div>
+            <div><h2 id="captureTitle">分享並框選 EXP</h2><p>分享遊戲視窗後會先自動尋找 EXP 面板；找不到或框錯時仍可手動拖曳。</p></div>
           </div>
 
           <div class="xp-capture-actions">
             <button id="shareWindow" class="xp-button xp-button--primary" type="button">選擇遊戲視窗</button>
+            <button id="autoFindExp" class="xp-button" type="button" disabled>自動尋找 EXP</button>
             <button id="stopCapture" class="xp-button xp-button--quiet" type="button" disabled>停止分享</button>
             <button id="clearRegion" class="xp-button xp-button--quiet" type="button" disabled>重選範圍</button>
           </div>
@@ -86,13 +88,13 @@
               <span>點選「選擇遊戲視窗」後，預覽會顯示在這裡。</span>
             </div>
           </div>
-          <p id="regionHelp" class="xp-inline-help">請勿把等級、HP、快捷鍵數量一起框入；範圍越貼近 EXP 數字，辨識越穩定。</p>
+          <p id="regionHelp" class="xp-inline-help">自動框選會辨認 EXP 長條外框；若手動調整，請勿把等級、HP、快捷鍵數量一起框入。</p>
         </section>
 
         <section class="xp-card" aria-labelledby="detectTitle">
           <div class="xp-card__heading">
             <span>02</span>
-            <div><h2 id="detectTitle">設定自動辨識</h2><p>支援「12345 / 67890」、「12345」或「42.35%」三種顯示。</p></div>
+            <div><h2 id="detectTitle">設定自動辨識</h2><p>支援「12345」、「12345 / 67890」、「12345 (42.35%)」或純百分比。</p></div>
           </div>
 
           <div class="xp-form-grid">
