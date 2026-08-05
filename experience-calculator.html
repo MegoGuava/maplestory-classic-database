@@ -16,11 +16,11 @@
       }
     </script>
     <link rel="stylesheet" href="styles.css?v=20260805" />
-    <link rel="stylesheet" href="experience-calculator.css?v=20260805-4" />
-    <script defer src="experience-core.js?v=20260805-4"></script>
-    <script defer src="experience-panel-detector.js?v=20260805-4"></script>
+    <link rel="stylesheet" href="experience-calculator.css?v=20260805-5" />
+    <script defer src="experience-core.js?v=20260805-5"></script>
+    <script defer src="experience-panel-detector.js?v=20260805-5"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js" integrity="sha384-2BQ3U3OdKOb0Uczxqr41I9UvZkzr4V9Hv8uSzMMZAlmhsFClvdZX5wi5fDCzG+tM" crossorigin="anonymous"></script>
-    <script defer src="experience-calculator.js?v=20260805-4"></script>
+    <script defer src="experience-calculator.js?v=20260805-5"></script>
   </head>
   <body class="xp-page">
     <header class="xp-hero">
@@ -80,6 +80,15 @@
             <button id="clearRegion" class="xp-button xp-button--quiet" type="button" disabled>重選範圍</button>
           </div>
 
+          <div class="xp-zoom-controls" aria-label="預覽縮放控制">
+            <span>預覽縮放</span>
+            <button id="zoomOut" class="xp-zoom-button" type="button" aria-label="縮小預覽" disabled>−</button>
+            <input id="previewZoom" type="range" min="100" max="400" step="25" value="100" aria-label="預覽縮放倍率" disabled />
+            <output id="zoomValue" for="previewZoom">100%</output>
+            <button id="zoomIn" class="xp-zoom-button" type="button" aria-label="放大預覽" disabled>＋</button>
+            <button id="zoomReset" class="xp-zoom-reset" type="button" disabled>重設</button>
+          </div>
+
           <div id="previewShell" class="xp-preview-shell" data-empty="true">
             <video id="captureVideo" muted playsinline hidden></video>
             <canvas id="previewCanvas" width="960" height="540" aria-label="分享畫面預覽；可拖曳選取經驗值區域"></canvas>
@@ -88,7 +97,7 @@
               <span>點選「選擇遊戲視窗」後，預覽會顯示在這裡。</span>
             </div>
           </div>
-          <p id="regionHelp" class="xp-inline-help">自動框選會辨認 EXP 長條外框；若手動調整，請勿把等級、HP、快捷鍵數量一起框入。</p>
+          <p id="regionHelp" class="xp-inline-help">可把預覽放大至 400% 並捲動畫面精準框選；自動框選會辨認 EXP 文字、外框與綠色經驗條。</p>
         </section>
 
         <section class="xp-card" aria-labelledby="detectTitle">
