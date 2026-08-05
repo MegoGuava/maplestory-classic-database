@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="個人使用的楓之谷經驗值計算器，可從分享的遊戲視窗辨識經驗值並統計練功效率。" />
+    <title>楓之谷經典服・經驗值計算器</title>
+    <script>
+      try {
+        const savedTheme = localStorage.getItem("maple-theme");
+        const preferredTheme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = savedTheme || preferredTheme;
+      } catch (_) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css?v=20260805" />
+    <link rel="stylesheet" href="experience-calculator.css?v=20260805" />
+    <script defer src="experience-core.js?v=20260805"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js" integrity="sha384-2BQ3U3OdKOb0Uczxqr41I9UvZkzr4V9Hv8uSzMMZAlmhsFClvdZX5wi5fDCzG+tM" crossorigin="anonymous"></script>
+    <script defer src="experience-calculator.js?v=20260805"></script>
+  </head>
+  <body class="xp-page">
+    <header class="xp-hero">
+      <div class="shell xp-hero__inner">
+        <div class="xp-toolbar">
+          <a class="xp-back-link" href="index.html">← 回資料庫</a>
+          <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="切換深色或明亮介面">
+            <span id="themeIcon" class="theme-toggle__icon" aria-hidden="true">☾</span>
+            <span id="themeLabel">切換暗色</span>
+          </button>
+        </div>
+        <p class="eyebrow"><span></span>PERSONAL EXP TRACKER</p>
+        <h1>經驗值<br /><em>計算器</em></h1>
+        <p class="xp-hero__copy">分享遊戲視窗並框選 EXP 數字，計算器會在瀏覽器內辨識讀值，自動統計開始／結束時間、經驗獲得量與每小時效率。</p>
+        <div class="xp-trust-row" aria-label="隱私與功能說明">
+          <span>只讀取你主動分享的畫面</span>
+          <span>不讀記憶體</span>
+          <span>不發送鍵盤滑鼠操作</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell xp-main">
+      <section class="xp-session" aria-labelledby="sessionTitle">
+        <div class="xp-section-heading">
+          <div>
+            <p class="section-kicker">CURRENT SESSION</p>
+            <h2 id="sessionTitle">本次練功紀錄</h2>
+          </div>
+          <span id="sessionStatus" class="xp-status-pill" data-state="idle">尚未開始</span>
+        </div>
+
+        <div class="xp-metrics">
+          <div><span>開始時間</span><strong id="startTime">—</strong></div>
+          <div><span>結束／目前時間</span><strong id="endTime">—</strong></div>
+          <div><span>經過時間</span><strong id="duration">00:00:00</strong></div>
+          <div><span>起始 EXP</span><strong id="startExp">—</strong></div>
+          <div><span>目前／結束 EXP</span><strong id="currentExp">—</strong></div>
+          <div class="xp-metric--accent"><span>獲得 EXP</span><strong id="gainedExp">0</strong></div>
+          <div><span>平均 EXP／小時</span><strong id="hourlyRate">0</strong></div>
+          <div><span>最近辨識</span><strong id="lastDetected">—</strong></div>
+        </div>
+
+        <div class="xp-session-actions">
+          <button id="startSession" class="xp-button xp-button--primary" type="button">開始計算</button>
+          <button id="stopSession" class="xp-button" type="button" disabled>結束並保存</button>
+          <button id="resetSession" class="xp-button xp-button--quiet" type="button">重設本次</button>
+        </div>
+      </section>
+
+      <div class="xp-workspace">
+        <section class="xp-card xp-capture-card" aria-labelledby="captureTitle">
+          <div class="xp-card__heading">
+            <span>01</span>
+            <div><h2 id="captureTitle">分享並框選 EXP</h2><p>建議只分享遊戲視窗，再用滑鼠拖曳框住 EXP 數字或百分比。</p></div>
+          </div>
+
+          <div class="xp-capture-actions">
+            <button id="shareWindow" class="xp-button xp-button--primary" type="button">選擇遊戲視窗</button>
+            <button id="stopCapture" class="xp-button xp-button--quiet" type="button" disabled>停止分享</button>
+            <button id="clearRegion" class="xp-button xp-button--quiet" type="button" disabled>重選範圍</button>
+          </div>
+
+          <div id="previewShell" class="xp-preview-shell" data-empty="true">
+            <video id="captureVideo" muted playsinline hidden></video>
+            <canvas id="previewCanvas" width="960" height="540" aria-label="分享畫面預覽；可拖曳選取經驗值區域"></canvas>
+            <div id="previewEmpty" class="xp-preview-empty">
+              <strong>尚未分享畫面</strong>
+              <span>點選「選擇遊戲視窗」後，預覽會顯示在這裡。</span>
+            </div>
+          </div>
+          <p id="regionHelp" class="xp-inline-help">框選時只保留 EXP 數字，區域越小、文字越清楚，辨識越穩定。</p>
+        </section>
+
+        <section class="xp-card" aria-labelledby="detectTitle">
+          <div class="xp-card__heading">
+            <span>02</span>
+            <div><h2 id="detectTitle">設定自動辨識</h2><p>支援「12345 / 67890」、「12345」或「42.35%」三種顯示。</p></div>
+          </div>
+
+          <div class="xp-form-grid">
+            <label>
+              <span>讀值格式</span>
+              <select id="readingFormat">
+                <option value="auto">自動判斷</option>
+                <option value="absolute">目前 EXP 數字</option>
+                <option value="ratio">目前 / 升級所需</option>
+                <option value="percent">經驗百分比</option>
+              </select>
+            </label>
+            <label>
+              <span>本級升級所需 EXP</span>
+              <input id="maxExp" type="number" inputmode="numeric" min="1" step="1" placeholder="百分比模式需要填寫" />
+            </label>
+            <label>
+              <span>辨識間隔</span>
+              <select id="scanInterval">
+                <option value="2000">每 2 秒</option>
+                <option value="3000" selected>每 3 秒</option>
+                <option value="5000">每 5 秒</option>
+                <option value="10000">每 10 秒</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="xp-detect-actions">
+            <button id="startDetection" class="xp-button xp-button--primary" type="button" disabled>開始自動辨識</button>
+            <button id="stopDetection" class="xp-button" type="button" disabled>停止辨識</button>
+          </div>
+
+          <div class="xp-detection-state">
+            <div>
+              <span>辨識狀態</span>
+              <strong id="detectionStatus" data-state="idle">等待分享畫面</strong>
+              <small id="ocrProgress">第一次使用會下載 OCR 核心，之後瀏覽器會快取。</small>
+            </div>
+            <div>
+              <span>OCR 原始文字</span>
+              <strong id="rawOcrText">—</strong>
+              <small id="ocrConfidence">信心度 —</small>
+            </div>
+          </div>
+
+          <div class="xp-ocr-preview">
+            <span>實際送入辨識的黑白畫面</span>
+            <canvas id="ocrCanvas" width="640" height="100"></canvas>
+          </div>
+
+          <details class="xp-manual-entry">
+            <summary>手動輸入／校正讀值</summary>
+            <div>
+              <label><span>目前 EXP</span><input id="manualExp" type="number" inputmode="numeric" min="0" step="1" placeholder="例如 46832" /></label>
+              <button id="applyManual" class="xp-button" type="button">套用讀值</button>
+            </div>
+            <p>若遊戲字體太小或 OCR 誤判，可在不中斷計時的情況下手動校正。</p>
+          </details>
+        </section>
+      </div>
+
+      <section class="xp-card xp-history" aria-labelledby="historyTitle">
+        <div class="xp-section-heading">
+          <div><p class="section-kicker">LOCAL HISTORY</p><h2 id="historyTitle">最近練功紀錄</h2></div>
+          <button id="clearHistory" class="xp-button xp-button--quiet" type="button">清除全部紀錄</button>
+        </div>
+        <div class="xp-table-wrap">
+          <table>
+            <thead><tr><th>開始</th><th>結束</th><th>時間</th><th>起始 EXP</th><th>結束 EXP</th><th>獲得 EXP</th><th>EXP／小時</th></tr></thead>
+            <tbody id="historyRows"></tbody>
+          </table>
+          <p id="emptyHistory" class="xp-empty-history">尚未保存任何練功紀錄。</p>
+        </div>
+      </section>
+
+      <aside class="source-note xp-note">
+        <div class="source-note__mark">i</div>
+        <div>
+          <h3>使用限制與隱私</h3>
+          <p>畫面只能在你按下按鈕並由瀏覽器授權後讀取；停止分享或關閉分頁就會中止。OCR 在目前瀏覽器內執行，畫面不會上傳到本站。辨識仍可能受解析度、特效與字體影響，重要紀錄建議用手動欄位確認。</p>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footer"><div class="shell"><span>經典服個人經驗計算器</span><span>純畫面監控・非官方玩家工具</span></div></footer>
+  </body>
+</html>
