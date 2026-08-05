@@ -3,6 +3,7 @@
 
   const core = window.MapleExpCalculatorCore;
   const panelDetector = window.MapleExpPanelDetector;
+  const pixelReader = window.MapleExpPixelReader;
   if (!core) return;
 
   const $ = (selector) => document.querySelector(selector);
@@ -21,13 +22,15 @@
   };
 
   const ocrCanvases = {
+    pixel: document.createElement("canvas"),
     source: document.createElement("canvas"),
     locator: document.createElement("canvas"),
     color: document.createElement("canvas"),
     enhanced: document.createElement("canvas"),
+    bright: document.createElement("canvas"),
     text: document.createElement("canvas")
   };
-  const ocrVariantLabels = { color: "彩色原圖", enhanced: "彩色增強", text: "文字強化" };
+  const ocrVariantLabels = { pixel: "遊戲像素字辨識", color: "彩色原圖", enhanced: "彩色增強", bright: "亮字提取", text: "文字強化" };
 
   const formatNumber = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) ? new Intl.NumberFormat("zh-TW").format(Math.round(Number(value))) : "—";
   const formatDateTime = (value) => value ? new Intl.DateTimeFormat("zh-TW", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)) : "—";
@@ -368,12 +371,15 @@
         width: match.width / canvas.width,
         height: match.height / canvas.height
       };
-      const textBottom = Math.min(match.y + match.height, match.bar.y + 2);
+      const textLeft = Math.min(match.x + match.width - 1, match.x + Math.round(match.width * 0.2));
+      const textTop = Math.min(match.bar.y - 1, match.y + Math.max(1, Math.round(match.bar.height * 0.12)));
+      const textRight = match.x + match.width;
+      const textBottom = Math.min(match.y + match.height, match.bar.y - 1);
       state.ocrSelection = {
-        x: match.x / canvas.width,
-        y: match.y / canvas.height,
-        width: match.width / canvas.width,
-        height: Math.max(1, textBottom - match.y) / canvas.height
+        x: textLeft / canvas.width,
+        y: textTop / canvas.height,
+        width: Math.max(1, textRight - textLeft) / canvas.width,
+        height: Math.max(1, textBottom - textTop) / canvas.height
       };
       state.preferredOcrVariant = "color";
       setDetectionStatus("已自動找到 EXP 區塊", "working", `綠色框顯示整個面板；定位信心 ${Math.round(match.confidence * 100)}%。`);
@@ -489,11 +495,20 @@
     const targetHeight = Math.max(140, Math.round(sourceHeight * scale));
     const padding = Math.max(18, Math.min(48, Math.round(targetHeight * 0.22)));
 
+    const pixel = ocrCanvases.pixel;
+    pixel.width = sourceWidth;
+    pixel.height = sourceHeight;
+    const pixelContext = pixel.getContext("2d", { willReadFrequently: true });
+    pixelContext.imageSmoothingEnabled = false;
+    pixelContext.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+    const pixelImage = pixelContext.getImageData(0, 0, sourceWidth, sourceHeight);
+
     const source = ocrCanvases.source;
     source.width = targetWidth;
     source.height = targetHeight;
     const sourceContext = source.getContext("2d", { willReadFrequently: true });
-    sourceContext.imageSmoothingEnabled = false;
+    sourceContext.imageSmoothingEnabled = true;
+    sourceContext.imageSmoothingQuality = "high";
     sourceContext.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, targetWidth, targetHeight);
 
     const color = paddedCanvas("color", targetWidth, targetHeight, padding);
@@ -502,6 +517,7 @@
     const sourceImage = sourceContext.getImageData(0, 0, targetWidth, targetHeight);
     const enhancedImage = sourceContext.createImageData(targetWidth, targetHeight);
     enhancedImage.data.set(sourceImage.data);
+    const brightImage = sourceContext.createImageData(targetWidth, targetHeight);
     const textImage = sourceContext.createImageData(targetWidth, targetHeight);
     const histogram = new Uint32Array(256);
     const luminances = new Uint8Array(targetWidth * targetHeight);
@@ -519,6 +535,7 @@
     }
 
     const threshold = otsuThreshold(histogram, luminances.length);
+    const brightThreshold = Math.max(155, Math.min(225, threshold + 24));
     let darkPixels = 0;
     for (const luminance of luminances) if (luminance <= threshold) darkPixels += 1;
     const brightIsText = luminances.length - darkPixels < darkPixels;
@@ -529,13 +546,28 @@
       textImage.data[index + 1] = value;
       textImage.data[index + 2] = value;
       textImage.data[index + 3] = 255;
+      const brightValue = luminances[pixel] >= brightThreshold ? 0 : 255;
+      brightImage.data[index] = brightValue;
+      brightImage.data[index + 1] = brightValue;
+      brightImage.data[index + 2] = brightValue;
+      brightImage.data[index + 3] = 255;
     }
 
     const enhanced = paddedCanvas("enhanced", targetWidth, targetHeight, padding);
     enhanced.context.putImageData(enhancedImage, padding, padding);
+    const bright = paddedCanvas("bright", targetWidth, targetHeight, padding);
+    bright.context.putImageData(brightImage, padding, padding);
     const text = paddedCanvas("text", targetWidth, targetHeight, padding);
     text.context.putImageData(textImage, padding, padding);
-    return { color: color.canvas, enhanced: enhanced.canvas, text: text.canvas };
+    return { pixel: pixelImage, color: color.canvas, enhanced: enhanced.canvas, bright: bright.canvas, text: text.canvas };
+  }
+
+  function recognizePixelFrame(frames) {
+    if (!pixelReader?.recognize || !frames?.pixel) return null;
+    const result = pixelReader.recognize(frames.pixel);
+    if (!result?.text) return null;
+    const reading = core.parseExperienceText(result.text, elements.readingFormat.value, Number(elements.maxExp.value));
+    return { variant: "pixel", text: result.text, confidence: result.confidence, reading, pixelResult: result };
   }
 
   async function ensureOcrWorker() {
@@ -552,7 +584,7 @@
         }
       });
       await worker.setParameters({
-        tessedit_char_whitelist: "0123456789.,/%()OQILSBZGD",
+        tessedit_char_whitelist: "0123456789.,/%()",
         tessedit_pageseg_mode: "7",
         preserve_interword_spaces: "1",
         user_defined_dpi: "300"
@@ -563,9 +595,9 @@
     return state.ocrWorkerPromise;
   }
 
-  async function recognizeFrames(worker, frames) {
-    const order = [...new Set([state.preferredOcrVariant, "color", "enhanced", "text"])];
-    let bestAttempt = null;
+  async function recognizeFrames(worker, frames, initialAttempts = []) {
+    const order = [...new Set([state.preferredOcrVariant, "color", "enhanced", "bright", "text"])];
+    const attempts = [...initialAttempts];
     for (const variant of order) {
       if (!state.detectionRunning) return null;
       elements.ocrProgress.textContent = `${ocrVariantLabels[variant]}辨識中…`;
@@ -573,14 +605,11 @@
       const text = result?.data?.text?.trim() || "";
       const confidence = Number(result?.data?.confidence);
       const reading = core.parseExperienceText(text, elements.readingFormat.value, Number(elements.maxExp.value));
-      const attempt = { variant, text, confidence, reading };
-      if (!bestAttempt || (Number.isFinite(confidence) ? confidence : -1) > (Number.isFinite(bestAttempt.confidence) ? bestAttempt.confidence : -1)) bestAttempt = attempt;
-      if (reading.valid) {
-        state.preferredOcrVariant = variant;
-        return attempt;
-      }
+      attempts.push({ variant, text, confidence, reading });
     }
-    return bestAttempt;
+    const selected = core.selectOcrAttempt(attempts, state.lastReading?.current);
+    if (selected?.reading?.valid) state.preferredOcrVariant = selected.variant;
+    return selected;
   }
 
   async function scanOnce() {
@@ -588,15 +617,23 @@
     try {
       const frames = buildOcrFrames();
       if (!frames) throw new Error("尚未取得可辨識的畫面。");
-      const worker = await ensureOcrWorker();
-      if (!state.detectionRunning) return;
       setDetectionStatus("正在辨識 EXP", "working", "辨識期間仍會持續計時。");
-      const attempt = await recognizeFrames(worker, frames);
+      const pixelAttempt = recognizePixelFrame(frames);
+      let attempt = pixelAttempt && pixelAttempt.reading.valid && pixelAttempt.confidence >= 82
+        ? core.selectOcrAttempt([pixelAttempt], state.lastReading?.current)
+        : null;
+      if (!attempt?.reading?.valid) {
+        const worker = await ensureOcrWorker();
+        if (!state.detectionRunning) return;
+        attempt = await recognizeFrames(worker, frames, pixelAttempt ? [pixelAttempt] : []);
+      }
       if (!attempt) return;
       const { text, confidence, reading, variant } = attempt;
       elements.rawOcrText.textContent = text || "（沒有文字）";
       elements.rawOcrText.title = text;
-      elements.ocrConfidence.textContent = Number.isFinite(confidence) ? `信心度 ${Math.round(confidence)}%` : "信心度 —";
+      elements.ocrConfidence.textContent = Number.isFinite(confidence)
+        ? `信心度 ${Math.round(confidence)}%${attempt.rejected ? "・已忽略" : ""}`
+        : "信心度 —";
       if (!reading.valid) {
         setDetectionStatus("這次沒有可用讀值", "error", `${reading.error}；已自動嘗試彩色與文字強化辨識。`);
       } else {
