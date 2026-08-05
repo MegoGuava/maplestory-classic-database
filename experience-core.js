@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const MAX_REASONABLE_EXPERIENCE = 2147483647;
+
   const digitsOnly = (value) => String(value ?? "").replace(/\D/g, "");
   const integerValue = (value) => {
     const digits = digitsOnly(value);
@@ -127,6 +129,59 @@
     return { valid: false, delta: 0, leveled: false };
   }
 
+  function hasStructuredOcrMarker(text) {
+    const raw = String(text ?? "");
+    return /[%/]/.test(raw) || /\([^)]{1,16}\)/.test(raw);
+  }
+
+  function selectOcrAttempt(attempts, lastCurrent = null) {
+    const available = (Array.isArray(attempts) ? attempts : []).filter(Boolean);
+    if (!available.length) return null;
+    const fallback = [...available].sort((left, right) => (Number(right.confidence) || 0) - (Number(left.confidence) || 0))[0];
+    const candidates = available.filter((attempt) => attempt.reading?.valid && Number.isFinite(attempt.reading.current));
+    if (!candidates.length) return fallback;
+
+    const previous = Number(lastCurrent);
+    const hasPrevious = Number.isFinite(previous) && previous >= 0;
+    const scored = candidates.map((attempt) => {
+      const confidence = Number.isFinite(Number(attempt.confidence)) ? Number(attempt.confidence) : 0;
+      const current = Number(attempt.reading.current);
+      const structured = hasStructuredOcrMarker(attempt.text);
+      const agreement = candidates.filter((candidate) => Number(candidate.reading.current) === current).length;
+      const closeToPrevious = hasPrevious && Math.abs(current - previous) <= Math.max(10, previous * 0.08);
+      const overLimit = current > MAX_REASONABLE_EXPERIENCE;
+      let score = confidence;
+      if (structured) score += 32;
+      if (Number.isFinite(attempt.reading.percentage)) score += 12;
+      if (agreement >= 2) score += 42 + Math.min(12, (agreement - 2) * 6);
+      if (closeToPrevious) score += 28;
+      if (attempt.reading.max > 0 && current <= attempt.reading.max) score += 10;
+      if (overLimit) score = -Infinity;
+      const acceptable = !overLimit && (
+        confidence >= 45
+        || (structured && confidence >= 18)
+        || agreement >= 2
+        || (closeToPrevious && confidence >= 8)
+      );
+      return { attempt, score, acceptable, overLimit };
+    }).sort((left, right) => left.score === right.score ? 0 : left.score > right.score ? -1 : 1);
+
+    const accepted = scored.find((candidate) => candidate.acceptable);
+    if (accepted) return { ...accepted.attempt, score: accepted.score };
+
+    const strongest = scored[0];
+    const normalized = strongest?.attempt?.reading?.normalized || fallback?.reading?.normalized || "";
+    const error = scored.every((candidate) => candidate.overLimit)
+      ? "辨識數字異常過大，已忽略這次讀值"
+      : "OCR 信心度過低，已忽略這次讀值";
+    return {
+      ...(strongest?.attempt || fallback),
+      reading: invalid(normalized, error),
+      rejected: true,
+      score: strongest?.score ?? -Infinity
+    };
+  }
+
   function formatDuration(milliseconds) {
     const seconds = Math.max(0, Math.floor(Number(milliseconds) / 1000));
     const hours = Math.floor(seconds / 3600);
@@ -135,5 +190,5 @@
     return [hours, minutes, remainder].map((value) => String(value).padStart(2, "0")).join(":");
   }
 
-  window.MapleExpCalculatorCore = { normalizeOcrText, parseExperienceText, calculateDelta, formatDuration };
+  window.MapleExpCalculatorCore = { normalizeOcrText, parseExperienceText, calculateDelta, selectOcrAttempt, formatDuration };
 })();
