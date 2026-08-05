@@ -84,7 +84,21 @@
     if ((requestedFormat === "auto" || requestedFormat === "percent") && percentMatch) {
       const percentage = Number(percentMatch[1].replace(",", "."));
       if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) return invalid(normalized, "百分比超出 0～100% 範圍");
-      if (!maxFromSettings) return invalid(normalized, "百分比模式需要填寫本級升級所需 EXP");
+      const textWithoutPercent = normalized.replace(percentMatch[0], " ");
+      const displayedValues = (textWithoutPercent.match(/[0-9][0-9,\s]*/g) || []).map(integerValue).filter((value) => value !== null);
+      const displayedCurrent = displayedValues.sort((a, b) => String(b).length - String(a).length || b - a)[0] ?? null;
+      if (displayedCurrent !== null) {
+        const inferredMax = maxFromSettings || (percentage > 0 ? Math.round(displayedCurrent / percentage * 100) : null);
+        return {
+          valid: true,
+          kind: "absolute-percent",
+          current: displayedCurrent,
+          max: inferredMax,
+          percentage,
+          normalized
+        };
+      }
+      if (!maxFromSettings) return invalid(normalized, "只有百分比時，需要填寫本級升級所需 EXP");
       return {
         valid: true,
         kind: "percent",
