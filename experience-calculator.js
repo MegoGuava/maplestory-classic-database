@@ -4,6 +4,7 @@
   const core = window.MapleExpCalculatorCore;
   const panelDetector = window.MapleExpPanelDetector;
   const pixelReader = window.MapleExpPixelReader;
+  const barReader = window.MapleExpBarReader;
   if (!core) return;
 
   const $ = (selector) => document.querySelector(selector);
@@ -23,6 +24,7 @@
 
   const ocrCanvases = {
     pixel: document.createElement("canvas"),
+    bar: document.createElement("canvas"),
     source: document.createElement("canvas"),
     locator: document.createElement("canvas"),
     color: document.createElement("canvas"),
@@ -50,6 +52,7 @@
     dragStart: null,
     dragCurrent: null,
     ocrSelection: null,
+    barSelection: null,
     detectionRunning: false,
     findingPanel: false,
     locatorRunId: 0,
@@ -339,6 +342,7 @@
     state.findingPanel = true;
     state.selection = null;
     state.ocrSelection = null;
+    state.barSelection = null;
     setDetectionStatus("正在自動尋找 EXP", "working", "掃描遊戲畫面下半部的 EXP 文字與長條外框。");
     updateCaptureControls();
 
@@ -381,6 +385,12 @@
         width: Math.max(1, textRight - textLeft) / canvas.width,
         height: Math.max(1, textBottom - textTop) / canvas.height
       };
+      state.barSelection = {
+        x: match.bar.x / canvas.width,
+        y: match.bar.y / canvas.height,
+        width: match.bar.width / canvas.width,
+        height: match.bar.height / canvas.height
+      };
       state.preferredOcrVariant = "color";
       setDetectionStatus("已自動找到 EXP 區塊", "working", `綠色框顯示整個面板；定位信心 ${Math.round(match.confidence * 100)}%。`);
       window.setTimeout(centerSelectionInPreview, 0);
@@ -416,6 +426,7 @@
       await elements.captureVideo.play();
       state.selection = null;
       state.ocrSelection = null;
+      state.barSelection = null;
       videoTrack?.addEventListener("ended", stopCapture, { once: true });
       cancelAnimationFrame(state.previewFrame);
       drawPreview();
@@ -434,6 +445,7 @@
     state.captureStream = null;
     state.selection = null;
     state.ocrSelection = null;
+    state.barSelection = null;
     state.dragStart = null;
     state.dragCurrent = null;
     state.findingPanel = false;
@@ -481,6 +493,27 @@
     return { canvas, context };
   }
 
+  function captureRegionImage(region, canvas) {
+    const video = elements.captureVideo;
+    if (!video.videoWidth || !video.videoHeight || !region) return null;
+    const sourceX = Math.max(0, Math.round(region.x * video.videoWidth));
+    const sourceY = Math.max(0, Math.round(region.y * video.videoHeight));
+    const sourceWidth = Math.max(1, Math.min(video.videoWidth - sourceX, Math.round(region.width * video.videoWidth)));
+    const sourceHeight = Math.max(1, Math.min(video.videoHeight - sourceY, Math.round(region.height * video.videoHeight)));
+    canvas.width = sourceWidth;
+    canvas.height = sourceHeight;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.imageSmoothingEnabled = false;
+    context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+    return context.getImageData(0, 0, sourceWidth, sourceHeight);
+  }
+
+  function captureBarMeasurement() {
+    if (!barReader?.measure || !state.barSelection) return null;
+    const image = captureRegionImage(state.barSelection, ocrCanvases.bar);
+    return image ? barReader.measure(image) : null;
+  }
+
   function buildOcrFrames() {
     const video = elements.captureVideo;
     const region = state.ocrSelection || state.selection;
@@ -495,13 +528,7 @@
     const targetHeight = Math.max(140, Math.round(sourceHeight * scale));
     const padding = Math.max(18, Math.min(48, Math.round(targetHeight * 0.22)));
 
-    const pixel = ocrCanvases.pixel;
-    pixel.width = sourceWidth;
-    pixel.height = sourceHeight;
-    const pixelContext = pixel.getContext("2d", { willReadFrequently: true });
-    pixelContext.imageSmoothingEnabled = false;
-    pixelContext.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
-    const pixelImage = pixelContext.getImageData(0, 0, sourceWidth, sourceHeight);
+    const pixelImage = captureRegionImage(region, ocrCanvases.pixel);
 
     const source = ocrCanvases.source;
     source.width = targetWidth;
@@ -570,6 +597,84 @@
     return { variant: "pixel", text: result.text, confidence: result.confidence, reading, pixelResult: result };
   }
 
+  function pixelConsensus(attempts, totalFrames) {
+    const groups = new Map();
+    for (const attempt of attempts.filter((entry) => entry?.reading?.valid)) {
+      const key = String(attempt.reading.current);
+      const group = groups.get(key) || { attempts: [], confidenceTotal: 0 };
+      group.attempts.push(attempt);
+      group.confidenceTotal += Number(attempt.confidence) || 0;
+      groups.set(key, group);
+    }
+    const winner = [...groups.values()].sort((left, right) => right.attempts.length - left.attempts.length
+      || right.confidenceTotal / right.attempts.length - left.confidenceTotal / left.attempts.length)[0];
+    if (!winner) return { stable: null, candidate: null, votes: 0, totalFrames };
+    const best = [...winner.attempts].sort((left, right) => {
+      const leftHasPercentage = Number.isFinite(left.reading.percentage) ? 1 : 0;
+      const rightHasPercentage = Number.isFinite(right.reading.percentage) ? 1 : 0;
+      return rightHasPercentage - leftHasPercentage || (Number(right.confidence) || 0) - (Number(left.confidence) || 0);
+    })[0];
+    const votes = winner.attempts.length;
+    const averageConfidence = winner.confidenceTotal / votes;
+    const shared = { ...best, frameVotes: votes, frameTotal: totalFrames };
+    if (votes >= 3) {
+      return {
+        stable: { ...shared, confidence: Math.min(98, Math.round(averageConfidence + Math.min(8, (votes - 3) * 3))) },
+        candidate: null,
+        votes,
+        totalFrames
+      };
+    }
+    return { stable: null, candidate: votes >= 2 ? { ...shared, confidence: 0 } : null, votes, totalFrames };
+  }
+
+  function medianBarMeasurement(measurements, totalFrames) {
+    const reliable = measurements.filter((measurement) => measurement?.confidence >= 70);
+    if (reliable.length < 3) return null;
+    const sorted = [...reliable].sort((left, right) => left.percentage - right.percentage);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const spread = sorted[sorted.length - 1].percentage - sorted[0].percentage;
+    if (spread > 2.5) return null;
+    return { ...median, samples: reliable.length, totalFrames, spread };
+  }
+
+  async function collectFrameEvidence(initialFrames, frameCount = 5) {
+    const pixelAttempts = [];
+    const barMeasurements = [];
+    for (let index = 0; index < frameCount; index += 1) {
+      if (!state.detectionRunning) return null;
+      if (index > 0) await wait(120);
+      if (!state.detectionRunning) return null;
+      const pixelImage = index === 0
+        ? initialFrames.pixel
+        : captureRegionImage(state.ocrSelection || state.selection, ocrCanvases.pixel);
+      const pixelAttempt = recognizePixelFrame({ pixel: pixelImage });
+      if (pixelAttempt) pixelAttempts.push(pixelAttempt);
+      const barMeasurement = captureBarMeasurement();
+      if (barMeasurement) barMeasurements.push(barMeasurement);
+      elements.ocrProgress.textContent = `正在比對原始畫面 ${index + 1}/${frameCount}…`;
+    }
+    return {
+      pixel: pixelConsensus(pixelAttempts, frameCount),
+      bar: medianBarMeasurement(barMeasurements, frameCount)
+    };
+  }
+
+  function validateAgainstBar(reading, measurement) {
+    if (!measurement) return { valid: true, detail: "" };
+    const barText = `經驗條 ${measurement.percentage.toFixed(1)}%（${measurement.samples}/${measurement.totalFrames} 幀）`;
+    if (!Number.isFinite(reading?.percentage)) return { valid: true, detail: barText };
+    const difference = Math.abs(Number(reading.percentage) - measurement.percentage);
+    const tolerance = Math.max(2.2, 240 / Math.max(1, measurement.width));
+    if (difference > tolerance) {
+      return {
+        valid: false,
+        detail: `文字為 ${Number(reading.percentage).toFixed(2)}%，但${barText}，差距過大`
+      };
+    }
+    return { valid: true, detail: barText };
+  }
+
   async function ensureOcrWorker() {
     if (state.ocrWorker) return state.ocrWorker;
     if (state.ocrWorkerPromise) return state.ocrWorkerPromise;
@@ -617,15 +722,17 @@
     try {
       const frames = buildOcrFrames();
       if (!frames) throw new Error("尚未取得可辨識的畫面。");
-      setDetectionStatus("正在辨識 EXP", "working", "辨識期間仍會持續計時。");
-      const pixelAttempt = recognizePixelFrame(frames);
-      let attempt = pixelAttempt && pixelAttempt.reading.valid && pixelAttempt.confidence >= 82
-        ? core.selectOcrAttempt([pixelAttempt], state.lastReading?.current)
+      setDetectionStatus("正在辨識 EXP", "working", "正在比較連續畫面，辨識期間仍會持續計時。");
+      const evidence = await collectFrameEvidence(frames);
+      if (!evidence || !state.detectionRunning) return;
+      const stablePixel = evidence.pixel.stable;
+      let attempt = stablePixel && stablePixel.reading.valid && stablePixel.confidence >= 82
+        ? core.selectOcrAttempt([stablePixel], state.lastReading?.current)
         : null;
       if (!attempt?.reading?.valid) {
         const worker = await ensureOcrWorker();
         if (!state.detectionRunning) return;
-        attempt = await recognizeFrames(worker, frames, pixelAttempt ? [pixelAttempt] : []);
+        attempt = await recognizeFrames(worker, frames, evidence.pixel.candidate ? [evidence.pixel.candidate] : []);
       }
       if (!attempt) return;
       const { text, confidence, reading, variant } = attempt;
@@ -635,13 +742,23 @@
         ? `信心度 ${Math.round(confidence)}%${attempt.rejected ? "・已忽略" : ""}`
         : "信心度 —";
       if (!reading.valid) {
-        setDetectionStatus("這次沒有可用讀值", "error", `${reading.error}；已自動嘗試彩色與文字強化辨識。`);
+        setDetectionStatus("這次沒有可用讀值", "error", `${reading.error}；已比較連續畫面與多種文字強化版本。`);
       } else {
+        const barValidation = validateAgainstBar(reading, evidence.bar);
+        if (!barValidation.valid) {
+          elements.ocrConfidence.textContent = Number.isFinite(confidence)
+            ? `信心度 ${Math.round(confidence)}%・經驗條不一致・已忽略`
+            : "經驗條不一致・已忽略";
+          setDetectionStatus("數字與經驗條不一致，已忽略", "error", barValidation.detail);
+          return;
+        }
         if (reading.kind === "ratio" && reading.max > 0) elements.maxExp.value = String(reading.max);
         const processed = processReading(reading, "ocr");
         if (processed.accepted) {
           const percentage = Number.isFinite(reading.percentage) ? `（${reading.percentage.toFixed(2)}%）` : "";
-          setDetectionStatus(`已讀取 ${formatNumber(reading.current)} EXP`, "working", `${reading.kind === "percent" ? "百分比換算" : reading.kind === "ratio" ? "目前／升級所需" : "數字讀值"}${percentage}・${ocrVariantLabels[variant]}`);
+          const frameDetail = attempt.frameVotes ? `・${attempt.frameVotes}/${attempt.frameTotal} 幀一致` : "";
+          const barDetail = barValidation.detail ? `・${barValidation.detail}` : "";
+          setDetectionStatus(`已讀取 ${formatNumber(reading.current)} EXP`, "working", `${reading.kind === "percent" ? "百分比換算" : reading.kind === "ratio" ? "目前／升級所需" : "數字讀值"}${percentage}・${ocrVariantLabels[variant]}${frameDetail}${barDetail}`);
         }
         saveSettings();
       }
@@ -689,6 +806,7 @@
     if (region.width >= 0.02 && region.height >= 0.015) {
       state.selection = region;
       state.ocrSelection = null;
+      state.barSelection = null;
       stopDetection();
       setDetectionStatus("已更新辨識範圍", "working", "確認框內只包含 EXP 數字後，按下開始自動辨識。");
     }
@@ -706,6 +824,7 @@
     stopDetection();
     state.selection = null;
     state.ocrSelection = null;
+    state.barSelection = null;
     setDetectionStatus("請在預覽上拖曳 EXP 範圍", "working", "框選完成後即可重新啟動自動辨識。");
     updateCaptureControls();
   });
@@ -745,9 +864,12 @@
     state.ocrWorker?.terminate();
   });
   window.addEventListener("load", () => {
-    elements.ocrProgress.textContent = window.Tesseract?.createWorker
-      ? "OCR 元件已就緒；第一次辨識仍需下載英數字模型。"
-      : "OCR 元件載入失敗；請確認網路連線後重新整理。";
+    const fallbackStatus = window.Tesseract?.createWorker
+      ? "OCR 備援已就緒。"
+      : "OCR 備援未載入，但仍可使用像素字辨識。";
+    elements.ocrProgress.textContent = pixelReader?.recognize && barReader?.measure
+      ? `像素字、多幀與經驗條驗證已就緒；${fallbackStatus}`
+      : "畫面辨識元件載入失敗，請重新整理。";
   }, { once: true });
 
   loadSettings();

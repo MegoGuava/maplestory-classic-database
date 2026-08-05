@@ -19,9 +19,10 @@
     <link rel="stylesheet" href="experience-calculator.css?v=20260805-5" />
     <script defer src="experience-core.js?v=20260805-7"></script>
     <script defer src="experience-panel-detector.js?v=20260805-5"></script>
-    <script defer src="experience-pixel-reader.js?v=20260805-1"></script>
+    <script defer src="experience-pixel-reader.js?v=20260805-2"></script>
+    <script defer src="experience-bar-reader.js?v=20260805-1"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js" integrity="sha384-2BQ3U3OdKOb0Uczxqr41I9UvZkzr4V9Hv8uSzMMZAlmhsFClvdZX5wi5fDCzG+tM" crossorigin="anonymous"></script>
-    <script defer src="experience-calculator.js?v=20260805-7"></script>
+    <script defer src="experience-calculator.js?v=20260805-8"></script>
   </head>
   <body class="xp-page">
     <header class="xp-hero">
@@ -35,7 +36,7 @@
         </div>
         <p class="eyebrow"><span></span>PERSONAL EXP TRACKER</p>
         <h1>經驗值<br /><em>計算器</em></h1>
-        <p class="xp-hero__copy">分享遊戲視窗並框選 EXP 數字，計算器會在瀏覽器內辨識讀值，自動統計開始／結束時間、經驗獲得量與每小時效率。</p>
+        <p class="xp-hero__copy">分享遊戲視窗並框選 EXP，計算器會比對連續原始畫面、像素數字與經驗條，自動統計開始／結束時間、經驗獲得量與每小時效率。</p>
       </div>
     </header>
 
@@ -98,7 +99,7 @@
               <span>點選「選擇遊戲視窗」後，預覽會顯示在這裡。</span>
             </div>
           </div>
-          <p id="regionHelp" class="xp-inline-help">可把預覽放大至 400% 並捲動畫面精準框選；自動框選會辨認 EXP 文字、外框與綠色經驗條。</p>
+          <p id="regionHelp" class="xp-inline-help">可把預覽放大至 400% 並捲動畫面精準框選；預覽維持彩色，黑白強化只在程式內部使用。</p>
         </section>
 
         <section class="xp-card" aria-labelledby="detectTitle">
@@ -144,7 +145,7 @@
               <small id="ocrProgress">第一次使用會下載 OCR 核心，之後瀏覽器會快取。</small>
             </div>
             <div>
-              <span>OCR 原始文字</span>
+              <span>辨識原始文字</span>
               <strong id="rawOcrText">—</strong>
               <small id="ocrConfidence">信心度 —</small>
             </div>
@@ -179,7 +180,7 @@
         <div class="source-note__mark">i</div>
         <div>
           <h3>使用限制與隱私</h3>
-          <p>畫面只能在你按下按鈕並由瀏覽器授權後讀取；停止分享或關閉分頁就會中止。OCR 在目前瀏覽器內執行，畫面不會上傳到本站。辨識仍可能受解析度、特效與字體影響，重要紀錄建議用手動欄位確認。</p>
+          <p>畫面只能在你按下按鈕並由瀏覽器授權後讀取；停止分享或關閉分頁就會中止。像素辨識、多幀比對與 OCR 都在目前瀏覽器內執行，畫面不會上傳到本站。不一致的數字會被忽略，仍可用手動欄位校正。</p>
         </div>
       </aside>
     </main>
