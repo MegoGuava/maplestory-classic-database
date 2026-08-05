@@ -10,9 +10,14 @@
   function normalizeOcrText(value) {
     return String(value ?? "")
       .toUpperCase()
-      .replace(/[ＯOQ]/g, "0")
-      .replace(/[IL｜|]/g, "1")
-      .replace(/[：:]/g, ".")
+      .replace(/[０-９]/g, (digit) => String(digit.charCodeAt(0) - 0xFF10))
+      .replace(/[ＯODQ]/g, "0")
+      .replace(/[ＩIL｜|!]/g, "1")
+      .replace(/Z/g, "2")
+      .replace(/S/g, "5")
+      .replace(/G/g, "6")
+      .replace(/B/g, "8")
+      .replace(/[：:;]/g, ".")
       .replace(/[^0-9.,/%\s]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
@@ -35,9 +40,16 @@
         return { valid: true, kind: "ratio", current, max, percentage: current / max * 100, normalized };
       }
     }
-    if (requestedFormat === "ratio") return invalid(normalized, "找不到「目前 / 升級所需」格式");
+    if (requestedFormat === "ratio") {
+      const values = (normalized.match(/[0-9][0-9,.]*/g) || []).map(integerValue).filter((value) => value !== null);
+      if (values.length >= 2 && values[1] > 0 && values[0] <= values[1]) {
+        return { valid: true, kind: "ratio", current: values[0], max: values[1], percentage: values[0] / values[1] * 100, normalized };
+      }
+      return invalid(normalized, "找不到「目前 / 升級所需」格式");
+    }
 
-    const percentMatch = normalized.match(/([0-9]{1,3}(?:[.,][0-9]{1,4})?)\s*%/);
+    const percentMatch = normalized.match(/([0-9]{1,3}(?:[.,][0-9]{1,4})?)\s*%/)
+      || (requestedFormat === "percent" ? normalized.match(/(?:^|\s)([0-9]{1,3}[.,][0-9]{1,4})(?:\s|$)/) : null);
     if ((requestedFormat === "auto" || requestedFormat === "percent") && percentMatch) {
       const percentage = Number(percentMatch[1].replace(",", "."));
       if (!Number.isFinite(percentage) || percentage < 0 || percentage > 100) return invalid(normalized, "百分比超出 0～100% 範圍");

@@ -16,10 +16,10 @@
       }
     </script>
     <link rel="stylesheet" href="styles.css?v=20260805" />
-    <link rel="stylesheet" href="experience-calculator.css?v=20260805" />
-    <script defer src="experience-core.js?v=20260805"></script>
+    <link rel="stylesheet" href="experience-calculator.css?v=20260805-2" />
+    <script defer src="experience-core.js?v=20260805-2"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js" integrity="sha384-2BQ3U3OdKOb0Uczxqr41I9UvZkzr4V9Hv8uSzMMZAlmhsFClvdZX5wi5fDCzG+tM" crossorigin="anonymous"></script>
-    <script defer src="experience-calculator.js?v=20260805"></script>
+    <script defer src="experience-calculator.js?v=20260805-2"></script>
   </head>
   <body class="xp-page">
     <header class="xp-hero">
@@ -74,7 +74,7 @@
         <section class="xp-card xp-capture-card" aria-labelledby="captureTitle">
           <div class="xp-card__heading">
             <span>01</span>
-            <div><h2 id="captureTitle">分享並框選 EXP</h2><p>建議只分享遊戲視窗，再用滑鼠拖曳框住 EXP 數字或百分比。</p></div>
+            <div><h2 id="captureTitle">分享並框選 EXP</h2><p>分享遊戲視窗後，請用滑鼠拖曳並只框住一行 EXP 數字或百分比。</p></div>
           </div>
 
           <div class="xp-capture-actions">
@@ -91,7 +91,7 @@
               <span>點選「選擇遊戲視窗」後，預覽會顯示在這裡。</span>
             </div>
           </div>
-          <p id="regionHelp" class="xp-inline-help">框選時只保留 EXP 數字，區域越小、文字越清楚，辨識越穩定。</p>
+          <p id="regionHelp" class="xp-inline-help">請勿把等級、HP、快捷鍵數量一起框入；範圍越貼近 EXP 數字，辨識越穩定。</p>
         </section>
 
         <section class="xp-card" aria-labelledby="detectTitle">
@@ -141,11 +141,6 @@
               <strong id="rawOcrText">—</strong>
               <small id="ocrConfidence">信心度 —</small>
             </div>
-          </div>
-
-          <div class="xp-ocr-preview">
-            <span>實際送入辨識的黑白畫面</span>
-            <canvas id="ocrCanvas" width="640" height="100"></canvas>
           </div>
 
           <details class="xp-manual-entry">

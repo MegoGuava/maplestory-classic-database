@@ -14,9 +14,17 @@
     captureVideo: $("#captureVideo"), previewCanvas: $("#previewCanvas"), previewShell: $("#previewShell"), previewEmpty: $("#previewEmpty"), regionHelp: $("#regionHelp"),
     readingFormat: $("#readingFormat"), maxExp: $("#maxExp"), scanInterval: $("#scanInterval"),
     startDetection: $("#startDetection"), stopDetection: $("#stopDetection"), detectionStatus: $("#detectionStatus"), ocrProgress: $("#ocrProgress"),
-    rawOcrText: $("#rawOcrText"), ocrConfidence: $("#ocrConfidence"), ocrCanvas: $("#ocrCanvas"),
+    rawOcrText: $("#rawOcrText"), ocrConfidence: $("#ocrConfidence"),
     manualExp: $("#manualExp"), applyManual: $("#applyManual"), historyRows: $("#historyRows"), emptyHistory: $("#emptyHistory"), clearHistory: $("#clearHistory")
   };
+
+  const ocrCanvases = {
+    source: document.createElement("canvas"),
+    color: document.createElement("canvas"),
+    enhanced: document.createElement("canvas"),
+    text: document.createElement("canvas")
+  };
+  const ocrVariantLabels = { color: "彩色原圖", enhanced: "彩色增強", text: "文字強化" };
 
   const formatNumber = (value) => value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)) ? new Intl.NumberFormat("zh-TW").format(Math.round(Number(value))) : "—";
   const formatDateTime = (value) => value ? new Intl.DateTimeFormat("zh-TW", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date(value)) : "—";
@@ -39,6 +47,7 @@
     scanTimer: null,
     ocrWorker: null,
     ocrWorkerPromise: null,
+    preferredOcrVariant: "color",
     pendingJump: null,
     lastReading: null,
     history: storage.read("maple-exp-sessions", []),
@@ -289,11 +298,11 @@
       state.captureStream = stream;
       elements.captureVideo.srcObject = stream;
       await elements.captureVideo.play();
-      state.selection = { x: 0.16, y: 0.8, width: 0.68, height: 0.14 };
+      state.selection = null;
       stream.getVideoTracks()[0]?.addEventListener("ended", stopCapture, { once: true });
       cancelAnimationFrame(state.previewFrame);
       drawPreview();
-      setDetectionStatus("畫面已連接，請確認框選範圍", "working", "拖曳預覽可重新框選；預設先選取畫面底部中央。");
+      setDetectionStatus("畫面已連接，請框選 EXP", "working", "在彩色預覽上拖曳，只框住一行 EXP 數字或百分比。");
       updateCaptureControls();
     } catch (error) {
       if (error?.name === "NotAllowedError") setDetectionStatus("已取消或拒絕分享畫面", "error", "只有你再次按下按鈕並同意後，網站才可讀取畫面。");
@@ -315,7 +324,43 @@
     updateCaptureControls();
   }
 
-  function buildOcrFrame() {
+  const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)));
+
+  function otsuThreshold(histogram, totalPixels) {
+    let weightedTotal = 0;
+    for (let value = 0; value < 256; value += 1) weightedTotal += value * histogram[value];
+    let backgroundWeight = 0;
+    let backgroundSum = 0;
+    let bestVariance = -1;
+    let bestThreshold = 127;
+    for (let value = 0; value < 256; value += 1) {
+      backgroundWeight += histogram[value];
+      if (!backgroundWeight) continue;
+      const foregroundWeight = totalPixels - backgroundWeight;
+      if (!foregroundWeight) break;
+      backgroundSum += value * histogram[value];
+      const backgroundMean = backgroundSum / backgroundWeight;
+      const foregroundMean = (weightedTotal - backgroundSum) / foregroundWeight;
+      const variance = backgroundWeight * foregroundWeight * (backgroundMean - foregroundMean) ** 2;
+      if (variance > bestVariance) {
+        bestVariance = variance;
+        bestThreshold = value;
+      }
+    }
+    return bestThreshold;
+  }
+
+  function paddedCanvas(name, width, height, padding) {
+    const canvas = ocrCanvases[name];
+    canvas.width = width + padding * 2;
+    canvas.height = height + padding * 2;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return { canvas, context };
+  }
+
+  function buildOcrFrames() {
     const video = elements.captureVideo;
     const region = state.selection;
     if (!video.videoWidth || !region) return null;
@@ -323,29 +368,59 @@
     const sourceY = Math.round(region.y * video.videoHeight);
     const sourceWidth = Math.max(1, Math.round(region.width * video.videoWidth));
     const sourceHeight = Math.max(1, Math.round(region.height * video.videoHeight));
-    const scale = Math.min(4, Math.max(1.5, 900 / sourceWidth));
-    const targetWidth = Math.min(2000, Math.max(600, Math.round(sourceWidth * scale)));
-    const targetHeight = Math.max(70, Math.round(targetWidth * sourceHeight / sourceWidth));
-    const canvas = elements.ocrCanvas;
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    context.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, targetWidth, targetHeight);
-    const image = context.getImageData(0, 0, targetWidth, targetHeight);
-    let luminanceTotal = 0;
-    for (let index = 0; index < image.data.length; index += 4) luminanceTotal += image.data[index] * 0.2126 + image.data[index + 1] * 0.7152 + image.data[index + 2] * 0.0722;
-    const average = luminanceTotal / (image.data.length / 4);
-    const invert = average < 125;
-    for (let index = 0; index < image.data.length; index += 4) {
-      const luminance = image.data[index] * 0.2126 + image.data[index + 1] * 0.7152 + image.data[index + 2] * 0.0722;
-      const value = invert ? (luminance > Math.max(120, average + 28) ? 0 : 255) : (luminance > Math.min(190, average + 15) ? 255 : 0);
-      image.data[index] = value;
-      image.data[index + 1] = value;
-      image.data[index + 2] = value;
-      image.data[index + 3] = 255;
+    let scale = Math.min(6, Math.max(2, 1100 / sourceWidth, 120 / sourceHeight));
+    if (sourceWidth * scale > 2600) scale = 2600 / sourceWidth;
+    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+    const padding = Math.max(16, Math.min(40, Math.round(targetHeight * 0.22)));
+
+    const source = ocrCanvases.source;
+    source.width = targetWidth;
+    source.height = targetHeight;
+    const sourceContext = source.getContext("2d", { willReadFrequently: true });
+    sourceContext.imageSmoothingEnabled = false;
+    sourceContext.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, targetWidth, targetHeight);
+
+    const color = paddedCanvas("color", targetWidth, targetHeight, padding);
+    color.context.drawImage(source, padding, padding);
+
+    const sourceImage = sourceContext.getImageData(0, 0, targetWidth, targetHeight);
+    const enhancedImage = sourceContext.createImageData(targetWidth, targetHeight);
+    enhancedImage.data.set(sourceImage.data);
+    const textImage = sourceContext.createImageData(targetWidth, targetHeight);
+    const histogram = new Uint32Array(256);
+    const luminances = new Uint8Array(targetWidth * targetHeight);
+
+    for (let index = 0, pixel = 0; index < sourceImage.data.length; index += 4, pixel += 1) {
+      const luminance = clampByte(sourceImage.data[index] * 0.2126 + sourceImage.data[index + 1] * 0.7152 + sourceImage.data[index + 2] * 0.0722);
+      luminances[pixel] = luminance;
+      histogram[luminance] += 1;
+      const boostedLuminance = clampByte((luminance - 128) * 1.7 + 128);
+      const ratio = luminance > 0 ? boostedLuminance / luminance : 1;
+      enhancedImage.data[index] = clampByte(sourceImage.data[index] * ratio);
+      enhancedImage.data[index + 1] = clampByte(sourceImage.data[index + 1] * ratio);
+      enhancedImage.data[index + 2] = clampByte(sourceImage.data[index + 2] * ratio);
+      enhancedImage.data[index + 3] = 255;
     }
-    context.putImageData(image, 0, 0);
-    return canvas;
+
+    const threshold = otsuThreshold(histogram, luminances.length);
+    let darkPixels = 0;
+    for (const luminance of luminances) if (luminance <= threshold) darkPixels += 1;
+    const brightIsText = luminances.length - darkPixels < darkPixels;
+    for (let pixel = 0, index = 0; pixel < luminances.length; pixel += 1, index += 4) {
+      const foreground = brightIsText ? luminances[pixel] > threshold : luminances[pixel] <= threshold;
+      const value = foreground ? 0 : 255;
+      textImage.data[index] = value;
+      textImage.data[index + 1] = value;
+      textImage.data[index + 2] = value;
+      textImage.data[index + 3] = 255;
+    }
+
+    const enhanced = paddedCanvas("enhanced", targetWidth, targetHeight, padding);
+    enhanced.context.putImageData(enhancedImage, padding, padding);
+    const text = paddedCanvas("text", targetWidth, targetHeight, padding);
+    text.context.putImageData(textImage, padding, padding);
+    return { color: color.canvas, enhanced: enhanced.canvas, text: text.canvas };
   }
 
   async function ensureOcrWorker() {
@@ -362,7 +437,7 @@
         }
       });
       await worker.setParameters({
-        tessedit_char_whitelist: "0123456789.,/%",
+        tessedit_char_whitelist: "0123456789.,/%OQILSBZGD",
         tessedit_pageseg_mode: "7",
         preserve_interword_spaces: "1",
         user_defined_dpi: "300"
@@ -373,29 +448,48 @@
     return state.ocrWorkerPromise;
   }
 
+  async function recognizeFrames(worker, frames) {
+    const order = [...new Set([state.preferredOcrVariant, "color", "enhanced", "text"])];
+    let bestAttempt = null;
+    for (const variant of order) {
+      if (!state.detectionRunning) return null;
+      elements.ocrProgress.textContent = `${ocrVariantLabels[variant]}辨識中…`;
+      const result = await worker.recognize(frames[variant]);
+      const text = result?.data?.text?.trim() || "";
+      const confidence = Number(result?.data?.confidence);
+      const reading = core.parseExperienceText(text, elements.readingFormat.value, Number(elements.maxExp.value));
+      const attempt = { variant, text, confidence, reading };
+      if (!bestAttempt || (Number.isFinite(confidence) ? confidence : -1) > (Number.isFinite(bestAttempt.confidence) ? bestAttempt.confidence : -1)) bestAttempt = attempt;
+      if (reading.valid) {
+        state.preferredOcrVariant = variant;
+        return attempt;
+      }
+    }
+    return bestAttempt;
+  }
+
   async function scanOnce() {
     if (!state.detectionRunning) return;
     try {
-      const frame = buildOcrFrame();
-      if (!frame) throw new Error("尚未取得可辨識的畫面。");
+      const frames = buildOcrFrames();
+      if (!frames) throw new Error("尚未取得可辨識的畫面。");
       const worker = await ensureOcrWorker();
       if (!state.detectionRunning) return;
       setDetectionStatus("正在辨識 EXP", "working", "辨識期間仍會持續計時。");
-      const result = await worker.recognize(frame);
-      const text = result?.data?.text?.trim() || "";
-      const confidence = Number(result?.data?.confidence);
+      const attempt = await recognizeFrames(worker, frames);
+      if (!attempt) return;
+      const { text, confidence, reading, variant } = attempt;
       elements.rawOcrText.textContent = text || "（沒有文字）";
       elements.rawOcrText.title = text;
       elements.ocrConfidence.textContent = Number.isFinite(confidence) ? `信心度 ${Math.round(confidence)}%` : "信心度 —";
-      const reading = core.parseExperienceText(text, elements.readingFormat.value, Number(elements.maxExp.value));
       if (!reading.valid) {
-        setDetectionStatus("這次沒有可用讀值", "error", reading.error);
+        setDetectionStatus("這次沒有可用讀值", "error", `${reading.error}；已自動嘗試彩色與文字強化辨識。`);
       } else {
         if (reading.kind === "ratio" && reading.max > 0) elements.maxExp.value = String(reading.max);
         const processed = processReading(reading, "ocr");
         if (processed.accepted) {
           const percentage = Number.isFinite(reading.percentage) ? `（${reading.percentage.toFixed(2)}%）` : "";
-          setDetectionStatus(`已讀取 ${formatNumber(reading.current)} EXP`, "working", `${reading.kind === "percent" ? "百分比換算" : reading.kind === "ratio" ? "目前／升級所需" : "數字讀值"}${percentage}`);
+          setDetectionStatus(`已讀取 ${formatNumber(reading.current)} EXP`, "working", `${reading.kind === "percent" ? "百分比換算" : reading.kind === "ratio" ? "目前／升級所需" : "數字讀值"}${percentage}・${ocrVariantLabels[variant]}`);
         }
         saveSettings();
       }
@@ -410,6 +504,7 @@
     if (!state.captureStream || !state.selection) return;
     state.detectionRunning = true;
     state.pendingJump = null;
+    state.preferredOcrVariant = "color";
     updateCaptureControls();
     setDetectionStatus("正在啟動辨識", "working", "OCR 準備完成後會自動讀取第一筆 EXP。");
     await scanOnce();
